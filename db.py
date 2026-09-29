@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS ads (
   year INTEGER, mileage INTEGER, fuel TEXT, gearbox TEXT, body TEXT,
   customs TEXT, color TEXT, zero_km INTEGER DEFAULT 0, city TEXT,
   image_url TEXT, image_count INTEGER,
-  list_price INTEGER, first_price INTEGER, current_price INTEGER,
+  list_price INTEGER, list_mileage INTEGER, first_price INTEGER, current_price INTEGER,
   status TEXT DEFAULT 'pending',       -- pending | active | removed | skipped
   first_seen TEXT, last_seen TEXT, last_checked TEXT,
   miss_count INTEGER DEFAULT 0, removed_at TEXT,
@@ -28,6 +28,10 @@ def connect(path):
     con = sqlite3.connect(path)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
+    cols = {r[1] for r in con.execute("PRAGMA table_info(ads)")}
+    for name, kind in (("list_mileage", "INTEGER"), ("has_photo", "INTEGER DEFAULT 0")):
+        if name not in cols:  # upgrade databases created by older versions
+            con.execute(f"ALTER TABLE ads ADD COLUMN {name} {kind}")
     return con
 
 
