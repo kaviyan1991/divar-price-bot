@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
+    inputs:
+      test_post:
+        description: "Post one ad to the channel as a test"
+        type: boolean
+        default: false
 permissions:
   contents: write
 concurrency:
@@ -29,6 +34,7 @@ jobs:
       - name: Run bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          FORCE_POST_ONE: ${{ inputs.test_post && '1' || '' }}
         run: python3 main.py
       - name: Save database
         if: always() && steps.load.outcome == 'success'
