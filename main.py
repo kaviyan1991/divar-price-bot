@@ -241,6 +241,13 @@ def main():
         print("BOT_TOKEN is missing")
         return 1
     con = db.connect(config.DB_PATH)
+    if os.environ.get("FORCE_POST_ONE") == "1":  # manual test: post the newest ad now
+        con.execute("UPDATE ads SET post_eligible=1 WHERE token=(SELECT token FROM ads WHERE "
+                    "status='active' AND message_id IS NULL ORDER BY first_seen DESC LIMIT 1)")
+        post_new(con)
+        con.commit()
+        con.close()
+        return 0
     if not should_crawl(con):
         return 0
     try:
@@ -253,9 +260,6 @@ def main():
         db.set_state(con, "backoff_until", until)
         print("BLOCKED by Divar:", e, "- pausing until", until)
     con.commit()
-    if os.environ.get("FORCE_POST_ONE") == "1":  # manual test: post the newest ad once
-        con.execute("UPDATE ads SET post_eligible=1 WHERE token=(SELECT token FROM ads WHERE "
-                    "status='active' AND message_id IS NULL ORDER BY first_seen DESC LIMIT 1)")
     post_new(con)
     con.commit()
     total = con.execute("SELECT status, COUNT(*) FROM ads GROUP BY status").fetchall()
