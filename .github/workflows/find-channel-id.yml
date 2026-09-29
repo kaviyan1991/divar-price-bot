@@ -1,0 +1,30 @@
+name: find-channel-id
+on:
+  workflow_dispatch:
+jobs:
+  find:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: List chats the bot can see
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          token = os.environ.get("BOT_TOKEN", "")
+          if not token:
+              print("BOT_TOKEN secret is missing"); raise SystemExit(0)
+          data = json.load(urllib.request.urlopen("https://api.telegram.org/bot" + token + "/getUpdates", timeout=30))
+          print("ok:", data.get("ok"), "| updates:", len(data.get("result", [])))
+          seen = set()
+          for u in data.get("result", []):
+              for k in ("channel_post", "my_chat_member", "message"):
+                  if k in u:
+                      c = u[k]["chat"]
+                      if c["id"] not in seen:
+                          seen.add(c["id"])
+                          print("CHAT:", c["id"], "|", c.get("type"), "|", c.get("title") or c.get("username"))
+          if not seen:
+              print("No channel found yet. Post a message in the channel and run again.")
+          PY
