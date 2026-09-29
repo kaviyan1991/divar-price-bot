@@ -1,5 +1,6 @@
 """One run: crawl new ads, fetch details, re-check old ads, post/update the channel."""
 import datetime as dt
+import os
 import sys
 
 import config
@@ -252,6 +253,9 @@ def main():
         db.set_state(con, "backoff_until", until)
         print("BLOCKED by Divar:", e, "- pausing until", until)
     con.commit()
+    if os.environ.get("FORCE_POST_ONE") == "1":  # manual test: post the newest ad once
+        con.execute("UPDATE ads SET post_eligible=1 WHERE token=(SELECT token FROM ads WHERE "
+                    "status='active' AND message_id IS NULL ORDER BY first_seen DESC LIMIT 1)")
     post_new(con)
     con.commit()
     total = con.execute("SELECT status, COUNT(*) FROM ads GROUP BY status").fetchall()
