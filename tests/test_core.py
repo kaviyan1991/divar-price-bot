@@ -84,6 +84,21 @@ class DetailTests(unittest.TestCase):
         self.assertIn("#لندکروزر_2021", cap)
         self.assertIn("divar.ir/v/t1", cap)
 
+    def test_crawl_stores_rows(self):
+        con = db.connect(":memory:")
+        rows = [{"token": "a1", "title": "کمری", "list_price": 5e9, "list_mileage": 1000,
+                 "image_url": "x", "image_count": 2, "city": "رشت"},
+                {"token": "a2", "title": "بی عکس", "list_price": 5e9, "list_mileage": 0,
+                 "image_url": "", "image_count": 0, "city": "رشت"}]
+        old = divar.search_page
+        divar.search_page = lambda pag=None: (rows, None)
+        try:
+            main.crawl_list(con, backfill=True)
+        finally:
+            divar.search_page = old
+        self.assertEqual([r[0] for r in con.execute("SELECT token FROM ads")], ["a1"])
+        self.assertEqual(db.get_state(con, "backfill_done"), "1")
+
     def test_old_year_skipped(self):
         con = db.connect(":memory:")
         con.execute("INSERT INTO ads(token,status,first_seen) VALUES('t2','pending','x')")
