@@ -303,6 +303,7 @@ def main():
     con.commit()
     post_new(con)
     report.maybe_post(con)
+    report.maybe_post_daily(con)
     interact.process_updates(con)
     con.commit()
     total = con.execute("SELECT status, COUNT(*) FROM ads GROUP BY status").fetchall()
