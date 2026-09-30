@@ -243,6 +243,7 @@ def main():
     if os.environ.get("FORCE_POST_ONE") == "1":  # manual test: post the newest ad now
         con.execute("UPDATE ads SET post_eligible=1 WHERE token=(SELECT token FROM ads WHERE "
                     "status='active' AND message_id IS NULL ORDER BY first_seen DESC LIMIT 1)")
+        interact.process_updates(con)
         post_new(con)
         con.commit()
         con.close()
