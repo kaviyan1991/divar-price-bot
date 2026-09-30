@@ -29,27 +29,42 @@ def _call(method, params):
     return {"ok": False}
 
 
-def post_ad(caption, image_url):
+def link_button(url, text="🔗 مشاهده آگهی در دیوار"):
+    return {"inline_keyboard": [[{"text": text, "url": url}]]} if url else None
+
+
+def post_ad(caption, image_url, button_url=None):
     """Posts with photo; falls back to text. Returns message_id or None."""
+    kb = link_button(button_url)
     if image_url:
-        r = _call("sendPhoto", {"chat_id": config.CHANNEL_ID, "photo": image_url,
-                                "caption": caption, "parse_mode": "HTML"})
+        params = {"chat_id": config.CHANNEL_ID, "photo": image_url,
+                  "caption": caption, "parse_mode": "HTML"}
+        if kb:
+            params["reply_markup"] = kb
+        r = _call("sendPhoto", params)
         if r.get("ok"):
             return r["result"]["message_id"]
         print("sendPhoto failed:", r.get("description"))
-    r = _call("sendMessage", {"chat_id": config.CHANNEL_ID, "text": caption,
-                              "parse_mode": "HTML", "disable_web_page_preview": True})
+    params = {"chat_id": config.CHANNEL_ID, "text": caption,
+              "parse_mode": "HTML", "disable_web_page_preview": True}
+    if kb:
+        params["reply_markup"] = kb
+    r = _call("sendMessage", params)
     if r.get("ok"):
         return r["result"]["message_id"]
     print("sendMessage failed:", r.get("description"))
     return None
 
 
-def edit_ad(message_id, caption, has_photo):
+def edit_ad(message_id, caption, has_photo, button_url=None):
     method = "editMessageCaption" if has_photo else "editMessageText"
     key = "caption" if has_photo else "text"
-    r = _call(method, {"chat_id": config.CHANNEL_ID, "message_id": message_id,
-                       key: caption, "parse_mode": "HTML"})
+    params = {"chat_id": config.CHANNEL_ID, "message_id": message_id,
+              key: caption, "parse_mode": "HTML"}
+    kb = link_button(button_url)
+    if kb:
+        params["reply_markup"] = kb
+    r = _call(method, params)
     if not r.get("ok") and "not modified" not in (r.get("description") or ""):
         print("edit failed:", r.get("description"))
     return bool(r.get("ok"))
