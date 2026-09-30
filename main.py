@@ -6,9 +6,11 @@ import sys
 import config
 import db
 import divar
+import interact
+import report
 import stats
 import telegram
-from textutil import escape_html, fmt_int, fmt_price, hashtag, to_fa_digits
+from textutil import escape_html, fmt_int, fmt_price, to_fa_digits
 
 TEHRAN = dt.timezone(dt.timedelta(hours=3, minutes=30))
 
@@ -80,6 +82,7 @@ def apply_detail(con, token, d):
         (d["brand_model"], words[0] if words else "", words[1] if len(words) > 1 else "",
          d["year"], d["mileage"], d["fuel"], d["gearbox"], d["body"], customs, d["color"],
          zero, price, price, t, token))
+    con.execute("UPDATE ads SET photo_url=? WHERE token=?", (d.get("photo") or None, token))
     db.add_price(con, token, t, price)
     mark_duplicate(con, token)
 
@@ -186,12 +189,6 @@ def caption(con, ad):
                      f" آخرین قیمت: {fmt_price(price)}")
     lines.append(f"📍 {escape_html(ad['city'] or 'گیلان')} | "
                  f"<a href=\"https://divar.ir/v/{ad['token']}\">مشاهده در دیوار</a>")
-    tags_line = " ".join(x for x in (
-        hashtag(ad["brand"]), hashtag(ad["model"]),
-        hashtag(f"{ad['model']}_{ad['year']}") if ad["model"] else "") if x)
-    if stats.is_below_market(price, med):
-        tags_line += " #زیر_قیمت_بازار"
-    lines.append(tags_line)
     return "\n".join(lines)[:1024]
 
 
@@ -214,10 +211,12 @@ def post_new(con):
         if config.DRY_RUN:
             print("---- would post ----\n" + cap)
             continue
-        mid = telegram.post_ad(cap, ad["image_url"])
+        photo = ad["photo_url"] or ad["image_url"]
+        mid = telegram.post_ad(cap, photo)
         if mid:
             con.execute("UPDATE ads SET message_id=?, has_photo=? WHERE token=?",
-                        (mid, 1 if ad["image_url"] else 0, ad["token"]))
+                        (mid, 1 if photo else 0, ad["token"]))
+            interact.notify_watchers(con, ad, cap)
         con.commit()
     print(f"channel: {len(rows)} new post(s)")
 
@@ -248,7 +247,9 @@ def main():
         con.commit()
         con.close()
         return 0
+    interact.process_updates(con)
     if not should_crawl(con):
+        con.close()
         return 0
     try:
         crawl_list(con, backfill=db.get_state(con, "backfill_done") != "1")
@@ -261,6 +262,8 @@ def main():
         print("BLOCKED by Divar:", e, "- pausing until", until)
     con.commit()
     post_new(con)
+    report.maybe_post(con)
+    interact.process_updates(con)
     con.commit()
     total = con.execute("SELECT status, COUNT(*) FROM ads GROUP BY status").fetchall()
     print("database:", {r[0]: r[1] for r in total})
