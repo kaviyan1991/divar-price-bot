@@ -1,6 +1,7 @@
 """Weekly market report posted to the channel (Friday afternoon, Tehran time)."""
 import datetime as dt
 
+import analytics
 import config
 import db
 import stats
@@ -43,7 +44,7 @@ def build(con, now):
              f"آگهی جدید این هفته: {fa_num(new_ads)} | حذف‌شده (احتمالاً فروخته‌شده): {fa_num(gone)}"]
     if not moves:
         lines.append("\nهنوز دادهٔ کافی برای مقایسه با هفتهٔ قبل جمع نشده است.")
-        return "\n".join(lines)
+        return "\n".join(lines + market_lines(con, now))
     ups = sorted([m for m in moves if m[0] > 0.5], reverse=True)[:5]
     downs = sorted([m for m in moves if m[0] < -0.5])[:5]
     if ups:
@@ -57,7 +58,37 @@ def build(con, now):
     if not ups and not downs:
         lines.append("\nقیمت‌ها این هفته تقریباً ثابت بودند.")
     lines.append("\n(بر اساس میانهٔ قیمت؛ فقط مدل‌هایی که حداقل ۵ آگهی دارند)")
+    lines += market_lines(con, now)
     return "\n".join(lines)
+
+
+def market_lines(con, now):
+    models = [r[0] for r in con.execute("SELECT DISTINCT brand_model FROM ads WHERE brand_model IS NOT NULL")]
+    speeds, supplies = [], []
+    for bm in models:
+        days, n, label = analytics.sale_speed(con, bm)
+        if label:
+            speeds.append((days, bm, n))
+        cur, old = analytics.supply(con, bm, now)
+        if old >= 3:
+            supplies.append(((cur - old) * 100 / old, bm, cur))
+    out = []
+    if speeds:
+        speeds.sort()
+        out.append("\n🔥 <b>سریع‌ترین فروش:</b>")
+        out += [f"• {escape_html(bm)}: {fa_num(int(d))} روز" for d, bm, n in speeds[:3]]
+        if len(speeds) > 3:
+            out.append("🧊 <b>کندترین فروش:</b>")
+            out += [f"• {escape_html(bm)}: {fa_num(int(d))} روز" for d, bm, n in speeds[-3:][::-1]]
+    ups = sorted([s for s in supplies if s[0] >= 20], reverse=True)[:3]
+    downs = sorted([s for s in supplies if s[0] <= -20])[:3]
+    if ups:
+        out.append("\n📦 <b>عرضهٔ بیشتر (احتمال ارزانی):</b>")
+        out += [f"• {escape_html(bm)}: {fa_num(round(p))}٪+ ({fa_num(c)} آگهی)" for p, bm, c in ups]
+    if downs:
+        out.append("📦 <b>عرضهٔ کمتر (احتمال گرانی):</b>")
+        out += [f"• {escape_html(bm)}: {fa_num(round(abs(p)))}٪- ({fa_num(c)} آگهی)" for p, bm, c in downs]
+    return out
 
 
 def maybe_post(con):
