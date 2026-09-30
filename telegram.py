@@ -53,3 +53,41 @@ def edit_ad(message_id, caption, has_photo):
     if not r.get("ok") and "not modified" not in (r.get("description") or ""):
         print("edit failed:", r.get("description"))
     return bool(r.get("ok"))
+
+
+def send_message(chat_id, text, keyboard=None):
+    params = {"chat_id": chat_id, "text": text[:4096], "parse_mode": "HTML",
+              "disable_web_page_preview": True}
+    if keyboard:
+        params["reply_markup"] = {"inline_keyboard": keyboard}
+    return _call("sendMessage", params)
+
+
+def answer_callback(callback_id):
+    return _call("answerCallbackQuery", {"callback_query_id": callback_id})
+
+
+def get_updates(offset):
+    r = _call("getUpdates", {"offset": offset, "timeout": 0,
+                             "allowed_updates": ["message", "callback_query"]})
+    return r.get("result", []) if r.get("ok") else []
+
+
+def send_photo_bytes(chat_id, png, caption=""):
+    """Upload a PNG (e.g. a chart) using multipart/form-data."""
+    boundary = "----divarbot" + str(int(time.time() * 1000))
+    parts = []
+    for name, value in (("chat_id", str(chat_id)), ("caption", caption), ("parse_mode", "HTML")):
+        parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n"
+                     f"{value}\r\n".encode())
+    parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"photo\"; "
+                 f"filename=\"chart.png\"\r\nContent-Type: image/png\r\n\r\n".encode() + png + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode())
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{config.BOT_TOKEN}/sendPhoto", data=b"".join(parts),
+        headers={"content-type": f"multipart/form-data; boundary={boundary}"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.loads(r.read().decode())
+    except Exception as e:
+        return {"ok": False, "description": repr(e)}
