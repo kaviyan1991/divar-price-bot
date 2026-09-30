@@ -215,5 +215,26 @@ class AnalyticsTests(unittest.TestCase):
         self.assertIn("سریع‌ترین فروش", rep)
 
 
+class DailyTests(unittest.TestCase):
+    def test_jalali(self):
+        self.assertEqual(report.g2j(2026, 10, 1), (1405, 7, 9))
+        self.assertEqual(report.g2j(2026, 3, 21), (1405, 1, 1))
+
+    def test_daily_summary(self):
+        import datetime as dt
+        con = db.connect(":memory:")
+        _fill(con)
+        con.execute("UPDATE ads SET post_eligible=1, first_seen='2026-10-01T08:00:00Z'")
+        con.execute("INSERT INTO ads(token,title,brand_model,year,mileage,zero_km,status,first_price,"
+                    "current_price,first_seen,post_eligible) VALUES('cheap','x','تویوتا پرادو ۴ در',"
+                    "2022,40000,0,'active',4000000000,4000000000,'2026-10-01T09:00:00Z',1)")
+        con.execute("INSERT INTO price_history VALUES('p5','2026-10-01T10:00:00Z',5000000000)")
+        txt = report.build_daily(con, dt.date(2026, 10, 1))
+        self.assertIn("خلاصهٔ امروز", txt)
+        self.assertIn("۹ مهر", txt)
+        self.assertIn("زیر قیمت بازار امروز", txt)
+        self.assertIn("بیشترین کاهش قیمت امروز", txt)
+
+
 if __name__ == "__main__":
     unittest.main()
