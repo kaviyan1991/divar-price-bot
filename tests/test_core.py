@@ -1,8 +1,8 @@
 import os, sys, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["DRY_RUN"] = "1"
-import stats, divar, db, main
-from textutil import parse_int, parse_price, parse_year, fmt_price, hashtag
+import stats, divar, db, main, interact, report
+from textutil import parse_int, parse_price, parse_year, fmt_price, fmt_int, normalize
 
 
 class TextTests(unittest.TestCase):
@@ -17,9 +17,10 @@ class TextTests(unittest.TestCase):
         self.assertEqual(parse_year("۱۳۹۹"), 2020)
 
     def test_format(self):
-        self.assertEqual(fmt_price(19200000000), "۱۹.۲ میلیارد تومان")
+        self.assertEqual(fmt_price(19200000000), "۱۹٫۲ میلیارد تومان")
         self.assertEqual(fmt_price(850000000), "۸۵۰ میلیون تومان")
-        self.assertEqual(hashtag("لندکروزر 2021"), "#لندکروزر_2021")
+        self.assertEqual(fmt_int(40000), "۴۰٬۰۰۰")
+        self.assertEqual(normalize("هيوندای ‌ النترا"), normalize("هیوندای النترا"))
 
 
 class StatsTests(unittest.TestCase):
@@ -46,6 +47,8 @@ class StatsTests(unittest.TestCase):
 
 
 SAMPLE = {"sections": [
+    {"section_name": "IMAGE", "widgets": [
+        {"widget_type": "IMAGE_CAROUSEL", "data": {"items": [{"image": {"url": "https://img/big.webp"}}]}}]},
     {"section_name": "DESCRIPTION", "widgets": [
         {"widget_type": "DESCRIPTION_ROW", "data": {"text": "پلاک موقت منطقه آزاد انزلی"}}]},
     {"section_name": "LIST_DATA", "widgets": [
@@ -80,9 +83,9 @@ class DetailTests(unittest.TestCase):
         self.assertEqual(ad["status"], "active")
         self.assertEqual(ad["brand"], "تویوتا")
         cap = main.caption(con, ad)
-        self.assertIn("#تویوتا", cap)
-        self.assertIn("#لندکروزر_2021", cap)
+        self.assertNotIn("#", cap)
         self.assertIn("divar.ir/v/t1", cap)
+        self.assertEqual(ad["photo_url"], "https://img/big.webp")
 
     def test_crawl_stores_rows(self):
         con = db.connect(":memory:")
@@ -105,6 +108,48 @@ class DetailTests(unittest.TestCase):
         d = divar.parse_detail(SAMPLE); d["year"] = 2017
         main.apply_detail(con, "t2", d)
         self.assertEqual(con.execute("SELECT status FROM ads").fetchone()[0], "skipped")
+
+
+def _fill(con, n=6, base=5_000_000_000):
+    for i in range(n):
+        con.execute(
+            "INSERT INTO ads(token,title,brand_model,year,mileage,zero_km,status,first_price,"
+            "current_price,first_seen) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (f"p{i}", "پرادو فول", "تویوتا پرادو ۴ در", 2022, 40000 + i * 1000, 0, "active",
+             base + i * 100_000_000, base + i * 100_000_000, "2026-09-01T00:00:00Z"))
+        con.execute("INSERT INTO price_history VALUES(?,?,?)",
+                    (f"p{i}", "2026-09-01T00:00:00Z", base + i * 100_000_000))
+
+
+class BotTests(unittest.TestCase):
+    def test_parse_query(self):
+        self.assertEqual(interact.parse_query("پرادو ۱۴۰۱ ۴۰۰۰۰"), (["پرادو"], 2022, 40000))
+        self.assertEqual(interact.parse_query("Prado 2022")[0], ["پرادو"])
+
+    def test_search_and_estimate(self):
+        con = db.connect(":memory:")
+        _fill(con)
+        txt = interact.search_text(con, "پرادو 2022")
+        self.assertIn("میانه قیمت فعلی", txt)
+        self.assertIn("divar.ir/v/p0", txt)
+        est = interact.estimate_text(con, "تخمین پرادو 2022 41000")
+        self.assertIn("بازهٔ معقول", est)
+        self.assertIn("دادهٔ کافی", interact.estimate_text(con, "کمری 2022"))
+
+    def test_watch_match(self):
+        con = db.connect(":memory:")
+        _fill(con, 1)
+        ad = con.execute("SELECT * FROM ads").fetchone()
+        self.assertTrue(interact.watch_matches("پرادو 2022", ad))
+        self.assertFalse(interact.watch_matches("پرادو 2021", ad))
+
+    def test_weekly_series_and_report(self):
+        con = db.connect(":memory:")
+        _fill(con)
+        self.assertTrue(len(interact.weekly_series(con, [f"p{i}" for i in range(6)])) >= 1)
+        import datetime as dt
+        txt = report.build(con, dt.datetime(2026, 9, 30, tzinfo=dt.timezone.utc))
+        self.assertIn("گزارش هفتگی", txt)
 
 
 if __name__ == "__main__":
