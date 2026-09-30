@@ -156,39 +156,50 @@ def market(con, ad):
     return stats.group_median([r[0] for r in rows])
 
 
+def ad_url(ad):
+    return f"https://divar.ir/v/{ad['token']}"
+
+
 def caption(con, ad):
     med, n = market(con, ad)
     price = ad["current_price"]
-    lines = [f"🚗 <b>{escape_html(ad['title'])}</b>",
-             f"🏷 {escape_html(ad['brand_model'])} | 📅 {to_fa_digits(ad['year'])}"
-             + (" | 🆕 صفر" if ad["zero_km"] else ""),
-             f"🛣 {fmt_int(ad['mileage'])} کیلومتر | ⛽ {escape_html(ad['fuel'] or '؟')}"
-             f" | ⚙️ {escape_html(ad['gearbox'] or '؟')}",
-             f"🛡 بدنه: {escape_html(ad['body'] or '؟')} | 📄 {escape_html(ad['customs'] or '؟')}",
-             f"💰 قیمت اولیه: {fmt_price(ad['first_price'])}"]
-    if price != ad["first_price"] and price and ad["first_price"]:
-        pct = round((price - ad["first_price"]) * 100 / ad["first_price"])
+    ok_price = price is not None and price >= config.PRICE_FLOOR
+    year = ad["year"]
+    year_txt = f"{to_fa_digits(year)} ({to_fa_digits(year - 621)})" if year else "؟"
+    lines = [f"🚗 <b>{escape_html(ad['title'])}</b>", ""]
+    specs = [
+        ("🏷", "مدل", to_fa_digits(ad["brand_model"] or "؟")),
+        ("📅", "سال ساخت", year_txt),
+        ("🛣", "کارکرد", "صفر کیلومتر 🆕" if ad["zero_km"] else f"{fmt_int(ad['mileage'])} کیلومتر"),
+        ("⛽", "سوخت", ad["fuel"] or "؟"),
+        ("⚙️", "گیربکس", ad["gearbox"] or "؟"),
+        ("🛡", "بدنه", ad["body"] or "؟"),
+        ("📄", "پلاک", ad["customs"] or "؟"),
+        ("📍", "شهر", ad["city"] or "گیلان"),
+    ]
+    lines += [f"{icon} {label}: {escape_html(str(value))}" for icon, label, value in specs]
+    lines += ["", f"💰 قیمت اولیه: {fmt_price(ad['first_price'])}"]
+    first = ad["first_price"]
+    if ok_price and first and first >= config.PRICE_FLOOR and price != first:
+        pct = round((price - first) * 100 / first)
         arrow = "🔻" if pct < 0 else "🔺"
         lines.append(f"💰 قیمت فعلی: {fmt_price(price)} ({arrow}{to_fa_digits(abs(pct))}٪)")
     if med:
-        diff = round((price - med) * 100 / med) if price else None
-        tail = f" ← {'+' if diff and diff > 0 else ''}{to_fa_digits(diff)}٪" if diff is not None else ""
+        tail = ""
+        if ok_price:
+            diff = round((price - med) * 100 / med)
+            tail = f" ({'+' if diff > 0 else ''}{to_fa_digits(diff)}٪)"
         lines.append(f"📊 میانه بازار ({to_fa_digits(n)} آگهی): {fmt_price(int(med))}{tail}")
     else:
         lines.append("📊 میانه بازار: هنوز دادهٔ کافی نیست")
-    tags = []
     if stats.is_below_market(price, med):
-        tags.append("🔻 زیر قیمت بازار")
+        lines.append("🔻 زیر قیمت بازار")
     if ad["duplicate_of"]:
-        tags.append("🔁 احتمالاً تکراری")
-    if tags:
-        lines.append(" | ".join(tags))
+        lines.append("🔁 احتمالاً تکراری")
     if ad["status"] == "removed":
         days = days_between(ad["first_seen"], ad["removed_at"])
-        lines.append(f"❌ آگهی حذف شد — احتمالاً فروخته شد بعد از {to_fa_digits(days)} روز."
-                     f" آخرین قیمت: {fmt_price(price)}")
-    lines.append(f"📍 {escape_html(ad['city'] or 'گیلان')} | "
-                 f"<a href=\"https://divar.ir/v/{ad['token']}\">مشاهده در دیوار</a>")
+        lines.append(f"❌ آگهی حذف شد (احتمالاً فروخته شد) بعد از {to_fa_digits(days)} روز")
+        lines.append(f"آخرین قیمت: {fmt_price(price)}")
     return "\n".join(lines)[:1024]
 
 
@@ -196,7 +207,22 @@ def update_post(con, token):
     ad = con.execute("SELECT * FROM ads WHERE token=?", (token,)).fetchone()
     if not ad or not ad["message_id"] or config.DRY_RUN:
         return
-    telegram.edit_ad(ad["message_id"], caption(con, ad), bool(ad["has_photo"]))
+    telegram.edit_ad(ad["message_id"], caption(con, ad), bool(ad["has_photo"]), ad_url(ad))
+
+
+def fixups(con):
+    """One-time repairs of data written by older versions."""
+    con.execute("UPDATE ads SET year = year % 10000 WHERE year > 9999")
+    con.execute("UPDATE ads SET status='skipped' WHERE status IN ('active','pending') "
+                "AND year IS NOT NULL AND year < ?", (config.MIN_YEAR,))
+    con.commit()
+    if db.get_state(con, "layout_version") != "2" and not config.DRY_RUN:
+        rows = con.execute("SELECT token FROM ads WHERE message_id IS NOT NULL").fetchall()
+        for r in rows:
+            update_post(con, r["token"])
+        db.set_state(con, "layout_version", "2")
+        con.commit()
+        print(f"fixups: {len(rows)} old post(s) re-formatted")
 
 
 def post_new(con):
@@ -212,7 +238,7 @@ def post_new(con):
             print("---- would post ----\n" + cap)
             continue
         photo = ad["photo_url"] or ad["image_url"]
-        mid = telegram.post_ad(cap, photo)
+        mid = telegram.post_ad(cap, photo, ad_url(ad))
         if mid:
             con.execute("UPDATE ads SET message_id=?, has_photo=? WHERE token=?",
                         (mid, 1 if photo else 0, ad["token"]))
@@ -248,6 +274,7 @@ def main():
         con.commit()
         con.close()
         return 0
+    fixups(con)
     interact.process_updates(con)
     if not should_crawl(con):
         con.close()
