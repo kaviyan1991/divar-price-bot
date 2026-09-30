@@ -29,6 +29,8 @@ jobs:
           else
             echo "no data branch yet: starting a new database"
           fi
+      - name: Install chart library
+        run: pip install --quiet matplotlib
       - name: Tests
         run: python3 -m unittest discover -s tests
       - name: Run bot
