@@ -15,6 +15,8 @@ class TextTests(unittest.TestCase):
     def test_year(self):
         self.assertEqual(parse_year("۲۰۲۱"), 2021)
         self.assertEqual(parse_year("۱۳۹۹"), 2020)
+        self.assertEqual(parse_year("۱۴۰۴/۲۰۲۵"), 2025)
+        self.assertEqual(parse_year("۱۴۰۴ - 2025"), 2025)
 
     def test_format(self):
         self.assertEqual(fmt_price(19200000000), "۱۹٫۲ میلیارد تومان")
@@ -84,7 +86,9 @@ class DetailTests(unittest.TestCase):
         self.assertEqual(ad["brand"], "تویوتا")
         cap = main.caption(con, ad)
         self.assertNotIn("#", cap)
-        self.assertIn("divar.ir/v/t1", cap)
+        self.assertIn("📅 سال ساخت: ۲۰۲۱ (۱۴۰۰)", cap)
+        self.assertNotIn(" | ", cap)
+        self.assertEqual(main.ad_url(ad), "https://divar.ir/v/t1")
         self.assertEqual(ad["photo_url"], "https://img/big.webp")
 
     def test_crawl_stores_rows(self):
