@@ -120,6 +120,13 @@ def parse_detail(j):
             for w in s.get("widgets", []):
                 if w.get("widget_type") == "DESCRIPTION_ROW":
                     desc = (w.get("data") or {}).get("text", "")
+    photo = ""
+    for s in j.get("sections", []):
+        if s.get("section_name") == "IMAGE":
+            for w in s.get("widgets", []):
+                items = (w.get("data") or {}).get("items") or []
+                if items:
+                    photo = ((items[0] or {}).get("image") or {}).get("url", "")
     brand_model = pairs.get("برند و مدل", "")
     mileage = parse_int(pairs.get("کارکرد"))
     return {
@@ -132,6 +139,7 @@ def parse_detail(j):
         "price": parse_price(pairs.get("قیمت پایه") or pairs.get("قیمت")),
         "body": scores.get("بدنه", ""),
         "description": desc,
+        "photo": photo,
     }
 
 
