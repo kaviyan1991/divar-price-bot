@@ -35,10 +35,13 @@ def jalali_to_gregorian_year(y):
 
 
 def parse_year(s):
-    y = parse_int(s)
-    if y is None:
-        return None
-    return jalali_to_gregorian_year(y)
+    """'۱۴۰۴/۲۰۲۵' -> 2025 ; '۲۰۲۱' -> 2021 ; '۱۳۹۹' -> 2020."""
+    nums = [int(n) for n in re.findall(r"\d{4}", to_en_digits(s or ""))]
+    greg = [n for n in nums if 1950 <= n <= 2100]
+    if greg:
+        return greg[0]
+    jal = [n for n in nums if 1300 <= n <= 1500]
+    return jalali_to_gregorian_year(jal[0]) if jal else None
 
 
 def fa_num(s):
@@ -49,6 +52,8 @@ def fa_num(s):
 def fmt_price(p):
     if p is None:
         return "توافقی"
+    if p < 10_000_000:
+        return "درج نشده"
     if p >= 1_000_000_000:
         v = f"{p / 1_000_000_000:.2f}".rstrip("0").rstrip(".")
         return fa_num(v) + " میلیارد تومان"
