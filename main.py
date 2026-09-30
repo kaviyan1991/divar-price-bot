@@ -3,6 +3,7 @@ import datetime as dt
 import os
 import sys
 
+import analytics
 import config
 import db
 import divar
@@ -82,7 +83,9 @@ def apply_detail(con, token, d):
         (d["brand_model"], words[0] if words else "", words[1] if len(words) > 1 else "",
          d["year"], d["mileage"], d["fuel"], d["gearbox"], d["body"], customs, d["color"],
          zero, price, price, t, token))
-    con.execute("UPDATE ads SET photo_url=? WHERE token=?", (d.get("photo") or None, token))
+    con.execute("UPDATE ads SET photo_url=?, seller_type=? WHERE token=?",
+                (d.get("photo") or None,
+                 analytics.seller_type((row["title"] or "") + " " + (d["description"] or "")), token))
     db.add_price(con, token, t, price)
     mark_duplicate(con, token)
 
@@ -137,6 +140,9 @@ def recheck(con):
         elif d:
             price = d["price"]
             con.execute("UPDATE ads SET last_checked=?, miss_count=0 WHERE token=?", (t, r["token"]))
+            if r["seller_type"] is None:
+                con.execute("UPDATE ads SET seller_type=? WHERE token=?", (analytics.seller_type(
+                    (r["title"] or "") + " " + (d["description"] or "")), r["token"]))
             if price is not None and price != r["current_price"]:
                 con.execute("UPDATE ads SET current_price=? WHERE token=?", (price, r["token"]))
                 db.add_price(con, r["token"], t, price)
@@ -192,6 +198,12 @@ def caption(con, ad):
         lines.append(f"📊 میانه بازار ({to_fa_digits(n)} آگهی): {fmt_price(int(med))}{tail}")
     else:
         lines.append("📊 میانه بازار: هنوز دادهٔ کافی نیست")
+    fair = analytics.fair_price(con, ad)
+    if fair:
+        lines.append(f"⚖️ قیمت منصفانه با این کارکرد: {fmt_price(fair)}")
+    days, _, label = analytics.sale_speed(con, ad["brand_model"]) if ad["brand_model"] else (None, 0, None)
+    if label:
+        lines.append(f"{label[:1]} سرعت فروش این مدل: {label[2:]} (معمولاً {to_fa_digits(int(days))} روزه)")
     if stats.is_below_market(price, med):
         lines.append("🔻 زیر قیمت بازار")
     if ad["duplicate_of"]:
