@@ -156,5 +156,64 @@ class BotTests(unittest.TestCase):
         self.assertIn("گزارش هفتگی", txt)
 
 
+class AnalyticsTests(unittest.TestCase):
+    def setUp(self):
+        import analytics
+        self.an = analytics
+        self.con = db.connect(":memory:")
+        i = 0
+        for year, base in ((2021, 4_000_000_000), (2022, 4_500_000_000)):
+            for k in range(6):
+                km = 20000 + k * 20000
+                price = int(base * (1 - 0.03 * (km - 70000) / 10000))
+                customs = "پلاک ملی" if k % 2 else "منطقه آزاد / گذر موقت"
+                seller = "نمایشگاه" if k < 3 else "شخصی"
+                self.con.execute(
+                    "INSERT INTO ads(token,title,brand_model,year,mileage,zero_km,status,first_price,"
+                    "current_price,first_seen,customs,seller_type,post_eligible) "
+                    "VALUES(?,?,?,?,?,0,'active',?,?,?,?,?,1)",
+                    (f"a{i}", "کمری", "تویوتا کمری", year, km, price, price,
+                     "2026-09-01T00:00:00Z", customs, seller))
+                i += 1
+        for j, days in enumerate((3, 5, 6)):
+            self.con.execute(
+                "INSERT INTO ads(token,brand_model,year,mileage,zero_km,status,current_price,first_seen,"
+                "removed_at,post_eligible) VALUES(?,?,?,?,0,'removed',?,?,?,1)",
+                (f"r{j}", "تویوتا کمری", 2022, 50000, 4_400_000_000, "2026-09-01T00:00:00Z",
+                 f"2026-09-{1 + days:02d}T00:00:00Z"))
+
+    def test_seller_type(self):
+        self.assertEqual(self.an.seller_type("فروش در نمایشگاه اتو پارس"), "نمایشگاه")
+        self.assertEqual(self.an.seller_type("شخصی کم کارکرد"), "شخصی")
+
+    def test_mileage_and_fair_price(self):
+        pct, n = self.an.mileage_effect(self.con, "تویوتا کمری")
+        self.assertLess(pct, 0)
+        ad = self.con.execute("SELECT * FROM ads WHERE token='a0'").fetchone()
+        self.assertIsNotNone(self.an.fair_price(self.con, ad))
+
+    def test_year_speed_plate_seller(self):
+        dep, ny = self.an.year_depreciation(self.con, "تویوتا کمری")
+        self.assertGreater(dep, 0)
+        days, n, label = self.an.sale_speed(self.con, "تویوتا کمری")
+        self.assertEqual(label, "🔥 داغ")
+        mf, nf, mn, nn = self.an.plate_gap(self.con, "تویوتا کمری")
+        self.assertTrue(mf and mn)
+        md, nd, mp, np_ = self.an.seller_split(self.con, "تویوتا کمری")
+        self.assertTrue(md and mp)
+
+    def test_search_and_caption_show_analysis(self):
+        txt = interact.search_text(self.con, "کمری 2022")
+        self.assertIn("تحلیل بازار گیلان", txt)
+        self.assertIn("اثر کارکرد", txt)
+        ad = self.con.execute("SELECT * FROM ads WHERE token='a6'").fetchone()
+        cap = main.caption(self.con, ad)
+        self.assertIn("قیمت منصفانه با این کارکرد", cap)
+        self.assertIn("سرعت فروش این مدل: داغ", cap)
+        import datetime as dt
+        rep = report.build(self.con, dt.datetime(2026, 9, 30, tzinfo=dt.timezone.utc))
+        self.assertIn("سریع‌ترین فروش", rep)
+
+
 if __name__ == "__main__":
     unittest.main()
