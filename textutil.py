@@ -41,18 +41,30 @@ def parse_year(s):
     return jalali_to_gregorian_year(y)
 
 
+def fa_num(s):
+    """Latin digits/separators -> Persian digits with Persian separators."""
+    return to_fa_digits(str(s).replace(",", "\u066c").replace(".", "\u066b"))
+
+
 def fmt_price(p):
     if p is None:
         return "توافقی"
     if p >= 1_000_000_000:
         v = f"{p / 1_000_000_000:.2f}".rstrip("0").rstrip(".")
-        return to_fa_digits(v) + " میلیارد تومان"
-    v = f"{p / 1_000_000:.0f}"
-    return to_fa_digits(v) + " میلیون تومان"
+        return fa_num(v) + " میلیارد تومان"
+    v = f"{p / 1_000_000:,.0f}"
+    return fa_num(v) + " میلیون تومان"
 
 
 def fmt_int(n):
-    return to_fa_digits(f"{n:,}") if n is not None else "؟"
+    return fa_num(f"{n:,}") if n is not None else "؟"
+
+
+def normalize(s):
+    """For matching: unify Arabic/Persian letters, digits, drop spaces and ZWNJ."""
+    t = to_en_digits(s or "").lower()
+    t = t.replace("ي", "ی").replace("ك", "ک").replace("\u200c", "").replace("آ", "ا")
+    return re.sub(r"[\s\-_]+", "", t)
 
 
 def hashtag(s):
