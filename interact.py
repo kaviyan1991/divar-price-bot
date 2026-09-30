@@ -3,6 +3,7 @@ import datetime as dt
 import io
 import re
 
+import analytics
 import db
 import stats
 import telegram
@@ -132,6 +133,7 @@ def search_text(con, query):
             lines.append(f"• میانه تغییر قیمت تا حذف: {fa_num(round(stats.median(disc)))}٪")
         if len(cur) < 5:
             lines.append("⚠️ تعداد نمونه کم است؛ آمار را با احتیاط نگاه کنید.")
+    lines += analysis_lines(con, ads, year)
     lines.append("\n<b>آخرین آگهی‌های فعال:</b>")
     active_all = sorted([a for a in ads if a["status"] == "active"],
                         key=lambda a: a["first_seen"] or "", reverse=True)[:10]
@@ -154,6 +156,47 @@ def search_text(con, query):
     return "\n".join(lines)
 
 
+def analysis_lines(con, ads, year):
+    """Market analysis for the most common model among the matched ads (Gilan only)."""
+    models = {}
+    for a in ads:
+        models[a["brand_model"]] = models.get(a["brand_model"], 0) + 1
+    if not models:
+        return []
+    bm = max(models, key=models.get)
+    out = []
+    pct, n = analytics.mileage_effect(con, bm)
+    if pct is not None:
+        out.append(f"• اثر کارکرد: هر ۱۰٬۰۰۰ کیلومتر حدود {fa_num(round(abs(pct), 1))}٪ ارزان‌تر "
+                   f"({fa_num(n)} آگهی)")
+    dep, ny = analytics.year_depreciation(con, bm)
+    if dep is not None:
+        out.append(f"• هر سال قدیمی‌تر: حدود {fa_num(round(dep, 1))}٪ ارزان‌تر ({fa_num(ny)} سال مقایسه شد)")
+    mf, nf, mn, nn = analytics.plate_gap(con, bm, year)
+    if mf and mn:
+        gap = round((mf - mn) * 100 / mn)
+        out.append(f"• پلاک منطقه آزاد: {fmt_price(int(mf))} | پلاک ملی: {fmt_price(int(mn))} "
+                   f"({'+' if gap > 0 else ''}{fa_num(gap)}٪)")
+    days, ns, label = analytics.sale_speed(con, bm)
+    if label:
+        out.append(f"• سرعت فروش: {label} — میانه {fa_num(int(days))} روز ({fa_num(ns)} فروش)")
+    cur, old = analytics.supply(con, bm)
+    if old >= 3:
+        ch = round((cur - old) * 100 / old)
+        out.append(f"• عرضه: {fa_num(cur)} آگهی فعال (هفتهٔ قبل {fa_num(old)}، "
+                   f"{'+' if ch > 0 else ''}{fa_num(ch)}٪)")
+    md, nd, mp, np_ = analytics.seller_split(con, bm, year)
+    if md and mp:
+        out.append(f"• نمایشگاه: {fmt_price(int(md))} ({fa_num(nd)}) | شخصی: {fmt_price(int(mp))} ({fa_num(np_)})")
+    head = f"\n📐 <b>تحلیل بازار گیلان — {escape_html(to_fa(bm))}</b>"
+    return [head] + (out or ["دادهٔ کافی برای تحلیل هنوز جمع نشده؛ با گذشت چند روز کامل‌تر می‌شود."])
+
+
+def to_fa(s):
+    from textutil import to_fa_digits
+    return to_fa_digits(s or "")
+
+
 def estimate_text(con, query):
     words, year, mileage = parse_query(query)
     if not words or not year:
@@ -172,6 +215,17 @@ def estimate_text(con, query):
         return (f"برای «{escape_html(query)}» هنوز دادهٔ کافی ندارم "
                 f"({fa_num(len(prices))} آگهی؛ حداقل ۵ لازم است).")
     lo, mid, hi = _pct(prices, 0.25), stats.median(prices), _pct(prices, 0.75)
+    if mileage and pool is ads:
+        models = {}
+        for a in ads:
+            models[a["brand_model"]] = models.get(a["brand_model"], 0) + 1
+        bm = max(models, key=models.get)
+        pct, _ = analytics.mileage_effect(con, bm)
+        kms = [a["mileage"] for a in ads if a["mileage"] is not None]
+        if pct is not None and kms:
+            factor = 1 + pct / 100 * (mileage - stats.median(kms)) / 10000
+            lo, mid, hi = lo * factor, mid * factor, hi * factor
+            note = f" (با اصلاح برای کارکرد {fmt_int(mileage)} کیلومتر)"
     return (f"💡 <b>تخمین قیمت منصفانه</b>\n{escape_html(query)}{note}\n\n"
             f"بازهٔ معقول: {fmt_price(int(lo))} تا {fmt_price(int(hi))}\n"
             f"میانه: {fmt_price(int(mid))}\n"
