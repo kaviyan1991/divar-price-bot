@@ -20,12 +20,10 @@ def price_at(con, token, when):
 def build(con, now):
     week_ago = (now - dt.timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
     now_s = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    groups = {}
-    for a in con.execute("SELECT * FROM ads WHERE zero_km=0 AND duplicate_of IS NULL "
-                         "AND status IN ('active','removed') AND brand_model IS NOT NULL"):
-        groups.setdefault((a["brand_model"], a["year"]), []).append(a)
+    groups = exact_groups(con)
     moves = []
-    for (bm, year), ads in groups.items():
+    for ads in groups:
+        bm, year = ads[0]["brand_model"], ads[0]["year"]
         cur = [a["current_price"] for a in ads if a["status"] == "active"]
         old = []
         for a in ads:
@@ -35,7 +33,7 @@ def build(con, now):
         m_now, n_now = stats.group_median(cur)
         m_old, n_old = stats.group_median(old)
         if m_now and m_old:
-            moves.append(((m_now - m_old) * 100 / m_old, bm, year, m_now))
+            moves.append(((m_now - m_old) * 100 / m_old, f"{bm} ({analytics.describe(ads[0])})", year, m_now))
     new_ads = con.execute("SELECT COUNT(*) FROM ads WHERE status<>'skipped' AND first_seen>?",
                           (week_ago,)).fetchone()[0]
     gone = con.execute("SELECT COUNT(*) FROM ads WHERE status='removed' AND removed_at>?",
@@ -62,16 +60,33 @@ def build(con, now):
     return "\n".join(lines)
 
 
+def exact_groups(con):
+    """Groups of identical cars (every spec equal, mileage in the same 20k band)."""
+    groups = {}
+    for a in con.execute("SELECT * FROM ads WHERE duplicate_of IS NULL "
+                         "AND status IN ('active','removed') AND brand_model IS NOT NULL"):
+        key = analytics.spec_key(a)
+        if key is None:
+            continue
+        band = -1 if a["zero_km"] else (a["mileage"] or 0) // 20000
+        groups.setdefault(key + (band,), []).append(a)
+    return list(groups.values())
+
+
+def _label(ad):
+    return f"{ad['brand_model']} {ad['year']} ({analytics.describe(ad)})"
+
+
 def market_lines(con, now):
-    models = [r[0] for r in con.execute("SELECT DISTINCT brand_model FROM ads WHERE brand_model IS NOT NULL")]
     speeds, supplies = [], []
-    for bm in models:
-        days, n, label = analytics.sale_speed(con, bm)
+    for grp in exact_groups(con):
+        rep = grp[0]
+        days, n, label = analytics.sale_speed(con, rep)
         if label:
-            speeds.append((days, bm, n))
-        cur, old = analytics.supply(con, bm, now)
+            speeds.append((days, _label(rep), n))
+        cur, old = analytics.supply(con, rep, now)
         if old >= 3:
-            supplies.append(((cur - old) * 100 / old, bm, cur))
+            supplies.append(((cur - old) * 100 / old, _label(rep), cur))
     out = []
     if speeds:
         speeds.sort()
@@ -134,11 +149,7 @@ def g2j(gy, gm, gd):
 
 
 def _group_median(con, ad):
-    rows = con.execute(
-        "SELECT current_price FROM ads WHERE brand_model=? AND year=? AND zero_km=? "
-        "AND status IN ('active','removed') AND duplicate_of IS NULL AND token<>?",
-        (ad["brand_model"], ad["year"], ad["zero_km"], ad["token"])).fetchall()
-    return stats.group_median([r[0] for r in rows])[0]
+    return analytics.market(con, ad)[0]
 
 
 def build_daily(con, day):
