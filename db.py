@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS ads (
   miss_count INTEGER DEFAULT 0, removed_at TEXT,
   duplicate_of TEXT, below_market INTEGER DEFAULT 0,
   post_eligible INTEGER DEFAULT 0, message_id INTEGER, has_photo INTEGER DEFAULT 0,
-  photo_url TEXT, seller_type TEXT
+  photo_url TEXT, seller_type TEXT, engine TEXT, chassis TEXT, gearbox_cond TEXT
 );
 CREATE TABLE IF NOT EXISTS price_history (
   token TEXT, seen_at TEXT, price INTEGER
@@ -33,7 +33,8 @@ def connect(path):
     con.executescript(SCHEMA)
     cols = {r[1] for r in con.execute("PRAGMA table_info(ads)")}
     for name, kind in (("list_mileage", "INTEGER"), ("has_photo", "INTEGER DEFAULT 0"),
-                       ("photo_url", "TEXT"), ("seller_type", "TEXT")):
+                       ("photo_url", "TEXT"), ("seller_type", "TEXT"),
+                       ("engine", "TEXT"), ("chassis", "TEXT"), ("gearbox_cond", "TEXT")):
         if name not in cols:  # upgrade databases created by older versions
             con.execute(f"ALTER TABLE ads ADD COLUMN {name} {kind}")
     return con
