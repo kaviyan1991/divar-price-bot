@@ -79,10 +79,10 @@ def apply_detail(con, token, d):
     con.execute(
         "UPDATE ads SET brand_model=?, brand=?, model=?, year=?, mileage=?, fuel=?, gearbox=?,"
         " body=?, customs=?, color=?, zero_km=?, first_price=?, current_price=?, status='active',"
-        " last_checked=?, miss_count=0 WHERE token=?",
+        " last_checked=?, miss_count=0, engine=?, chassis=?, gearbox_cond=? WHERE token=?",
         (d["brand_model"], words[0] if words else "", words[1] if len(words) > 1 else "",
          d["year"], d["mileage"], d["fuel"], d["gearbox"], d["body"], customs, d["color"],
-         zero, price, price, t, token))
+         zero, price, price, t, d.get("engine"), d.get("chassis"), d.get("gearbox_cond"), token))
     con.execute("UPDATE ads SET photo_url=?, seller_type=? WHERE token=?",
                 (d.get("photo") or None,
                  analytics.seller_type((row["title"] or "") + " " + (d["description"] or "")), token))
@@ -140,14 +140,18 @@ def recheck(con):
         elif d:
             price = d["price"]
             con.execute("UPDATE ads SET last_checked=?, miss_count=0 WHERE token=?", (t, r["token"]))
-            if r["seller_type"] is None:
-                con.execute("UPDATE ads SET seller_type=? WHERE token=?", (analytics.seller_type(
-                    (r["title"] or "") + " " + (d["description"] or "")), r["token"]))
+            text = (r["title"] or "") + " " + (d["description"] or "")
+            con.execute(  # refresh specs so older ads get every comparison field
+                "UPDATE ads SET fuel=?, gearbox=?, color=?, body=?, engine=?, chassis=?, gearbox_cond=?,"
+                " customs=?, seller_type=?, photo_url=COALESCE(photo_url, ?) WHERE token=?",
+                (d["fuel"], d["gearbox"], d["color"], d["body"], d.get("engine"), d.get("chassis"),
+                 d.get("gearbox_cond"), divar.customs_status(text), analytics.seller_type(text),
+                 d.get("photo") or None, r["token"]))
             if price is not None and price != r["current_price"]:
                 con.execute("UPDATE ads SET current_price=? WHERE token=?", (price, r["token"]))
                 db.add_price(con, r["token"], t, price)
                 changed += 1
-                update_post(con, r["token"])
+            update_post(con, r["token"])  # specs/market may have changed
         con.commit()
     print(f"recheck: {len(rows)} checked, {changed} changed")
 
@@ -155,11 +159,7 @@ def recheck(con):
 # ---------- channel ----------
 
 def market(con, ad):
-    rows = con.execute(
-        "SELECT current_price FROM ads WHERE brand_model=? AND year=? AND zero_km=? "
-        "AND status IN ('active','removed') AND duplicate_of IS NULL AND token<>?",
-        (ad["brand_model"], ad["year"], ad["zero_km"], ad["token"])).fetchall()
-    return stats.group_median([r[0] for r in rows])
+    return analytics.market(con, ad)
 
 
 def ad_url(ad):
@@ -177,9 +177,12 @@ def caption(con, ad):
         ("🏷", "مدل", to_fa_digits(ad["brand_model"] or "؟")),
         ("📅", "سال ساخت", year_txt),
         ("🛣", "کارکرد", "صفر کیلومتر 🆕" if ad["zero_km"] else f"{fmt_int(ad['mileage'])} کیلومتر"),
+        ("🎨", "رنگ", ad["color"] or "؟"),
         ("⛽", "سوخت", ad["fuel"] or "؟"),
-        ("⚙️", "گیربکس", ad["gearbox"] or "؟"),
+        ("⚙️", "گیربکس", (ad["gearbox"] or "؟") + (f" ({ad['gearbox_cond']})" if ad["gearbox_cond"] else "")),
         ("🛡", "بدنه", ad["body"] or "؟"),
+        ("🔧", "موتور", ad["engine"] or "؟"),
+        ("🔩", "شاسی", ad["chassis"] or "؟"),
         ("📄", "پلاک", ad["customs"] or "؟"),
         ("📍", "شهر", ad["city"] or "گیلان"),
     ]
@@ -195,13 +198,13 @@ def caption(con, ad):
         if ok_price:
             diff = round((price - med) * 100 / med)
             tail = f" ({'+' if diff > 0 else ''}{to_fa_digits(diff)}٪)"
-        lines.append(f"📊 میانه بازار ({to_fa_digits(n)} آگهی): {fmt_price(int(med))}{tail}")
+        lines.append(f"📊 میانه بازار ({to_fa_digits(n)} آگهی کاملاً مشابه): {fmt_price(int(med))}{tail}")
     else:
-        lines.append("📊 میانه بازار: هنوز دادهٔ کافی نیست")
+        lines.append(f"📊 میانه بازار: {to_fa_digits(analytics.market_status(con, ad) or 'دادهٔ کافی نیست')}")
     fair = analytics.fair_price(con, ad)
     if fair:
         lines.append(f"⚖️ قیمت منصفانه با این کارکرد: {fmt_price(fair)}")
-    days, _, label = analytics.sale_speed(con, ad["brand_model"]) if ad["brand_model"] else (None, 0, None)
+    days, _, label = analytics.sale_speed(con, ad)
     if label:
         lines.append(f"{label[:1]} سرعت فروش این مدل: {label[2:]} (معمولاً {to_fa_digits(int(days))} روزه)")
     if stats.is_below_market(price, med):
