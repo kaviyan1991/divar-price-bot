@@ -114,15 +114,25 @@ class DetailTests(unittest.TestCase):
         self.assertEqual(con.execute("SELECT status FROM ads").fetchone()[0], "skipped")
 
 
+SPECS = dict(customs="پلاک ملی", fuel="بنزین", gearbox="اتوماتیک", color="سفید",
+             body="سالم و بی‌خط و خش", engine="سالم", chassis="سالم و پلمپ", gearbox_cond="سالم و پلمپ")
+
+
+def _add(con, token, **kw):
+    row = dict(token=token, title="پرادو فول", brand_model="تویوتا پرادو ۴ در", year=2022,
+               mileage=40000, zero_km=0, status="active", first_price=5_000_000_000,
+               current_price=5_000_000_000, first_seen="2026-09-01T00:00:00Z", post_eligible=1)
+    row.update(SPECS)
+    row.update(kw)
+    cols = ",".join(row)
+    con.execute(f"INSERT INTO ads({cols}) VALUES({','.join('?' * len(row))})", tuple(row.values()))
+    con.execute("INSERT INTO price_history VALUES(?,?,?)", (token, row["first_seen"], row["current_price"]))
+
+
 def _fill(con, n=6, base=5_000_000_000):
     for i in range(n):
-        con.execute(
-            "INSERT INTO ads(token,title,brand_model,year,mileage,zero_km,status,first_price,"
-            "current_price,first_seen) VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (f"p{i}", "پرادو فول", "تویوتا پرادو ۴ در", 2022, 40000 + i * 1000, 0, "active",
-             base + i * 100_000_000, base + i * 100_000_000, "2026-09-01T00:00:00Z"))
-        con.execute("INSERT INTO price_history VALUES(?,?,?)",
-                    (f"p{i}", "2026-09-01T00:00:00Z", base + i * 100_000_000))
+        _add(con, f"p{i}", mileage=40000 + i * 1000, first_price=base + i * 100_000_000,
+             current_price=base + i * 100_000_000)
 
 
 class BotTests(unittest.TestCase):
@@ -136,9 +146,9 @@ class BotTests(unittest.TestCase):
         txt = interact.search_text(con, "پرادو 2022")
         self.assertIn("میانه قیمت فعلی", txt)
         self.assertIn("divar.ir/v/p0", txt)
-        est = interact.estimate_text(con, "تخمین پرادو 2022 41000")
-        self.assertIn("بازهٔ معقول", est)
-        self.assertIn("دادهٔ کافی", interact.estimate_text(con, "کمری 2022"))
+        est = interact.estimate_text(con, "تخمین پرادو 2022 41000 سفید")
+        self.assertIn("حدود", est)
+        self.assertIn("پیدا نکردم", interact.estimate_text(con, "تخمین پرادو 2022 41000 مشکی"))
 
     def test_watch_match(self):
         con = db.connect(":memory:")
@@ -156,63 +166,64 @@ class BotTests(unittest.TestCase):
         self.assertIn("گزارش هفتگی", txt)
 
 
-class AnalyticsTests(unittest.TestCase):
+class ExactMatchTests(unittest.TestCase):
+    """Comparisons must only use cars identical in every spec."""
     def setUp(self):
         import analytics
         self.an = analytics
         self.con = db.connect(":memory:")
-        i = 0
-        for year, base in ((2021, 4_000_000_000), (2022, 4_500_000_000)):
-            for k in range(6):
-                km = 20000 + k * 20000
-                price = int(base * (1 - 0.03 * (km - 70000) / 10000))
-                customs = "پلاک ملی" if k % 2 else "منطقه آزاد / گذر موقت"
-                seller = "نمایشگاه" if k < 3 else "شخصی"
-                self.con.execute(
-                    "INSERT INTO ads(token,title,brand_model,year,mileage,zero_km,status,first_price,"
-                    "current_price,first_seen,customs,seller_type,post_eligible) "
-                    "VALUES(?,?,?,?,?,0,'active',?,?,?,?,?,1)",
-                    (f"a{i}", "کمری", "تویوتا کمری", year, km, price, price,
-                     "2026-09-01T00:00:00Z", customs, seller))
-                i += 1
-        for j, days in enumerate((3, 5, 6)):
-            self.con.execute(
-                "INSERT INTO ads(token,brand_model,year,mileage,zero_km,status,current_price,first_seen,"
-                "removed_at,post_eligible) VALUES(?,?,?,?,0,'removed',?,?,?,1)",
-                (f"r{j}", "تویوتا کمری", 2022, 50000, 4_400_000_000, "2026-09-01T00:00:00Z",
-                 f"2026-09-{1 + days:02d}T00:00:00Z"))
+        for i in range(4):
+            _add(self.con, f"w{i}", mileage=40000 + i * 2000, current_price=5_000_000_000 + i * 50_000_000)
+        _add(self.con, "black", color="مشکی", current_price=9_000_000_000)
+        _add(self.con, "free", customs="منطقه آزاد / گذر موقت", current_price=4_000_000_000)
+        _add(self.con, "painted", body="رنگ‌شدگی در ۱ ناحیه", current_price=4_200_000_000)
+        _add(self.con, "far_km", mileage=150000, current_price=3_000_000_000)
+        _add(self.con, "unknown", customs="نامشخص")
 
-    def test_seller_type(self):
-        self.assertEqual(self.an.seller_type("فروش در نمایشگاه اتو پارس"), "نمایشگاه")
-        self.assertEqual(self.an.seller_type("شخصی کم کارکرد"), "شخصی")
+    def test_only_identical_cars_are_compared(self):
+        ad = self.con.execute("SELECT * FROM ads WHERE token='w0'").fetchone()
+        tokens = {r["token"] for r in self.an.similar(self.con, ad)}
+        self.assertEqual(tokens, {"w1", "w2", "w3"})
+        med, n = self.an.market(self.con, ad)
+        self.assertEqual(n, 3)
 
-    def test_mileage_and_fair_price(self):
-        pct, n = self.an.mileage_effect(self.con, "تویوتا کمری")
-        self.assertLess(pct, 0)
-        ad = self.con.execute("SELECT * FROM ads WHERE token='a0'").fetchone()
-        self.assertIsNotNone(self.an.fair_price(self.con, ad))
+    def test_unknown_spec_is_never_compared(self):
+        ad = self.con.execute("SELECT * FROM ads WHERE token='unknown'").fetchone()
+        self.assertEqual(self.an.market(self.con, ad), (None, 0))
+        self.assertIn("نامشخص: نوع پلاک", self.an.market_status(self.con, ad))
+        w0 = self.con.execute("SELECT * FROM ads WHERE token='w0'").fetchone()
+        self.assertNotIn("unknown", {r["token"] for r in self.an.similar(self.con, w0)})
 
-    def test_year_speed_plate_seller(self):
-        dep, ny = self.an.year_depreciation(self.con, "تویوتا کمری")
-        self.assertGreater(dep, 0)
-        days, n, label = self.an.sale_speed(self.con, "تویوتا کمری")
-        self.assertEqual(label, "🔥 داغ")
-        mf, nf, mn, nn = self.an.plate_gap(self.con, "تویوتا کمری")
-        self.assertTrue(mf and mn)
-        md, nd, mp, np_ = self.an.seller_split(self.con, "تویوتا کمری")
-        self.assertTrue(md and mp)
+    def test_too_few_identical(self):
+        ad = self.con.execute("SELECT * FROM ads WHERE token='black'").fetchone()
+        self.assertIsNone(self.an.market(self.con, ad)[0])
+        self.assertIn("کمتر از", self.an.market_status(self.con, ad))
 
-    def test_search_and_caption_show_analysis(self):
-        txt = interact.search_text(self.con, "کمری 2022")
-        self.assertIn("تحلیل بازار گیلان", txt)
-        self.assertIn("اثر کارکرد", txt)
-        ad = self.con.execute("SELECT * FROM ads WHERE token='a6'").fetchone()
+    def test_caption_uses_exact_median(self):
+        ad = self.con.execute("SELECT * FROM ads WHERE token='w0'").fetchone()
         cap = main.caption(self.con, ad)
-        self.assertIn("قیمت منصفانه با این کارکرد", cap)
-        self.assertIn("سرعت فروش این مدل: داغ", cap)
-        import datetime as dt
-        rep = report.build(self.con, dt.datetime(2026, 9, 30, tzinfo=dt.timezone.utc))
-        self.assertIn("سریع‌ترین فروش", rep)
+        self.assertIn("آگهی کاملاً مشابه", cap)
+
+    def test_factor_analyses_vary_one_thing_only(self):
+        w0 = self.con.execute("SELECT * FROM ads WHERE token='w0'").fetchone()
+        mf, nf, mn, nn = self.an.plate_gap(self.con, w0)
+        self.assertEqual(nf, 1)   # only 'free' differs by plate; 'unknown' is excluded
+        self.assertEqual(nn, 4)
+        pct, n = self.an.mileage_effect(self.con, w0)
+        self.assertEqual(n, 5)    # w0..w3 + far_km (identical except mileage)
+        self.assertLess(pct, 0)
+        self.assertIsNotNone(self.an.fair_price(self.con, w0))
+        self.assertEqual(self.an.seller_type("فروش در نمایشگاه اتو پارس"), "نمایشگاه")
+
+    def test_sale_speed_and_search(self):
+        for j, days in enumerate((3, 5, 6)):
+            _add(self.con, f"r{j}", status="removed", removed_at=f"2026-09-{1 + days:02d}T00:00:00Z")
+        w0 = self.con.execute("SELECT * FROM ads WHERE token='w0'").fetchone()
+        self.assertEqual(self.an.sale_speed(self.con, w0)[2], "🔥 داغ")
+        txt = interact.search_text(self.con, "پرادو 2022")
+        self.assertIn("تحلیل بازار گیلان", txt)
+        self.assertIn("در هیچ مقایسه‌ای حساب نشدند", txt)
+        self.assertIn("سرعت فروش این مدل: داغ", main.caption(self.con, w0))
 
 
 class DailyTests(unittest.TestCase):
@@ -223,14 +234,12 @@ class DailyTests(unittest.TestCase):
     def test_daily_summary(self):
         import datetime as dt
         con = db.connect(":memory:")
-        _fill(con)
-        con.execute("UPDATE ads SET post_eligible=1, first_seen='2026-10-01T08:00:00Z'")
-        con.execute("INSERT INTO ads(token,title,brand_model,year,mileage,zero_km,status,first_price,"
-                    "current_price,first_seen,post_eligible) VALUES('cheap','x','تویوتا پرادو ۴ در',"
-                    "2022,40000,0,'active',4000000000,4000000000,'2026-10-01T09:00:00Z',1)")
-        con.execute("INSERT INTO price_history VALUES('p5','2026-10-01T10:00:00Z',5000000000)")
+        for i in range(4):
+            _add(con, f"d{i}", first_seen="2026-10-01T08:00:00Z", mileage=40000 + i * 1000)
+        _add(con, "cheap", first_seen="2026-10-01T09:00:00Z", current_price=4_000_000_000,
+             first_price=4_000_000_000)
+        con.execute("INSERT INTO price_history VALUES('d3','2026-10-01T10:00:00Z',4500000000)")
         txt = report.build_daily(con, dt.date(2026, 10, 1))
-        self.assertIn("خلاصهٔ امروز", txt)
         self.assertIn("۹ مهر", txt)
         self.assertIn("زیر قیمت بازار امروز", txt)
         self.assertIn("بیشترین کاهش قیمت امروز", txt)
