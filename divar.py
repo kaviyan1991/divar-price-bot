@@ -138,6 +138,9 @@ def parse_detail(j):
         "fuel": pairs.get("نوع سوخت", ""),
         "price": parse_price(pairs.get("قیمت پایه") or pairs.get("قیمت")),
         "body": scores.get("بدنه", ""),
+        "engine": scores.get("موتور", ""),
+        "chassis": scores.get("وضعیت شاسی‌ها", ""),
+        "gearbox_cond": scores.get("گیربکس", ""),
         "description": desc,
         "photo": photo,
     }
@@ -145,8 +148,9 @@ def parse_detail(j):
 
 def customs_status(text):
     t = text or ""
-    if any(k in t for k in ("منطقه آزاد", "منطقه ازاد", "گذر موقت", "پلاک موقت", "پلاک منطقه")):
+    if any(k in t for k in ("منطقه آزاد", "منطقه ازاد", "گذر موقت", "پلاک موقت", "پلاک منطقه",
+                            "پلاک انزلی", "پلاک آزاد", "پلاک ازاد", "منطقه‌آزاد")):
         return "منطقه آزاد / گذر موقت"
-    if "پلاک ملی" in t:
+    if any(k in t for k in ("پلاک ملی", "ملی شده", "پلاک شخصی ملی", "پلاک دائم", "پلاک دائمی")):
         return "پلاک ملی"
     return "نامشخص"
