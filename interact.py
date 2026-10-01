@@ -72,7 +72,7 @@ def find_ads(con, words, year):
         args.append(year)
     out = []
     for ad in con.execute(sql, args):
-        hay = normalize((ad["brand_model"] or "") + " " + (ad["title"] or ""))
+        hay = normalize(" ".join(str(ad[f] or "") for f in ("brand_model", "title", "color", "customs")))
         if all(w in hay for w in words):
             out.append(ad)
     return out
@@ -98,42 +98,64 @@ def _days(a, b):
 
 # ---------- answers ----------
 
+def _bucket(ad):
+    if ad["zero_km"]:
+        return "صفر کیلومتر"
+    km = ad["mileage"] or 0
+    lo = km // 20000 * 20
+    return f"کارکرد {fa_num(lo)} تا {fa_num(lo + 20)} هزار"
+
+
+def groups_of(ads):
+    """Split ads into groups that are identical in every spec (plus a mileage band)."""
+    groups, incomplete = {}, 0
+    for a in ads:
+        if a["duplicate_of"]:
+            continue
+        key = analytics.spec_key(a)
+        if key is None:
+            incomplete += 1
+            continue
+        groups.setdefault(key + (_bucket(a),), []).append(a)
+    return sorted(groups.values(), key=len, reverse=True), incomplete
+
+
 def search_text(con, query):
     words, year, _ = parse_query(query)
     ads = find_ads(con, words, year)
     if not ads:
         return (f"برای «{escape_html(query)}» آگهی‌ای پیدا نشد. 🤔\n"
                 "اسم مدل را کوتاه‌تر بنویسید (مثلاً «پرادو» به‌جای «تویوتا پرادو آفرود»).")
-    used = [a for a in ads if not a["zero_km"]]
-    zero = [a for a in ads if a["zero_km"]]
-    lines = [f"📊 <b>نتیجه برای «{escape_html(query)}»</b>"]
-    for label, group in (("کارکرده", used), ("صفر کیلومتر", zero)):
-        if not group:
-            continue
-        dups = {a["token"] for a in group if a["duplicate_of"]}
-        clean = [a for a in group if a["token"] not in dups]
-        active = [a for a in clean if a["status"] == "active"]
-        removed = [a for a in clean if a["status"] == "removed"]
-        cur = stats.valid_prices([a["current_price"] for a in active])
-        first = stats.valid_prices([a["first_price"] for a in active])
-        last = stats.valid_prices([a["current_price"] for a in removed])
-        days = [d for d in (_days(a["first_seen"], a["removed_at"]) for a in removed) if d is not None]
-        disc = [(a["current_price"] - a["first_price"]) * 100 / a["first_price"] for a in removed
-                if a["first_price"] and a["current_price"]]
-        lines.append(f"\n<b>{label}</b> — فعال: {fa_num(len(active))} | حذف‌شده: {fa_num(len(removed))}")
+    groups, incomplete = groups_of(ads)
+    lines = [f"📊 <b>نتیجه برای «{escape_html(query)}»</b>",
+             "فقط ماشین‌های کاملاً مشابه با هم مقایسه می‌شوند "
+             "(مدل، سال، پلاک، سوخت، گیربکس، رنگ، وضعیت بدنه/موتور/شاسی/گیربکس و کارکرد نزدیک)."]
+    for grp in groups[:6]:
+        a0 = grp[0]
+        active = [a for a in grp if a["status"] == "active"]
+        removed = [a for a in grp if a["status"] == "removed"]
+        head = (f"\n<b>{escape_html(to_fa(a0['brand_model']))} {fa_num(a0['year'])}</b> — "
+                f"{escape_html(analytics.describe(a0))} | {_bucket(a0)}")
+        lines.append(head)
+        cur, n = analytics._median_min([a["current_price"] for a in active], analytics.MIN_EXACT)
+        first, _ = analytics._median_min([a["first_price"] for a in active], analytics.MIN_EXACT)
+        last, nl = analytics._median_min([a["current_price"] for a in removed], analytics.MIN_EXACT)
+        lines.append(f"• فعال: {fa_num(len(active))} | حذف‌شده: {fa_num(len(removed))}")
         if cur:
-            lines.append(f"• میانه قیمت فعلی: {fmt_price(int(stats.median(cur)))}")
+            lines.append(f"• میانه قیمت فعلی: {fmt_price(int(cur))}")
         if first:
-            lines.append(f"• میانه قیمت اولیه: {fmt_price(int(stats.median(first)))}")
+            lines.append(f"• میانه قیمت اولیه: {fmt_price(int(first))}")
         if last:
-            lines.append(f"• میانه آخرین قیمت آگهی‌های حذف‌شده: {fmt_price(int(stats.median(last)))}")
-        if days:
-            lines.append(f"• میانه ماندگاری روی سایت: {fa_num(int(stats.median(days)))} روز")
-        if disc:
-            lines.append(f"• میانه تغییر قیمت تا حذف: {fa_num(round(stats.median(disc)))}٪")
-        if len(cur) < 5:
-            lines.append("⚠️ تعداد نمونه کم است؛ آمار را با احتیاط نگاه کنید.")
-    lines += analysis_lines(con, ads, year)
+            lines.append(f"• میانه آخرین قیمت حذف‌شده‌ها: {fmt_price(int(last))}")
+        if not cur:
+            lines.append(f"• کمتر از {fa_num(analytics.MIN_EXACT)} آگهی کاملاً مشابه؛ میانه حساب نشد.")
+    if len(groups) > 6:
+        lines.append(f"\n… و {fa_num(len(groups) - 6)} گروه دیگر با مشخصات متفاوت.")
+    if incomplete:
+        lines.append(f"\nℹ️ {fa_num(incomplete)} آگهی چون مشخصاتشان کامل نیست (مثلاً نوع پلاک)، "
+                     "در هیچ مقایسه‌ای حساب نشدند.")
+    if groups:
+        lines += analysis_lines(con, groups[0][0])
     lines.append("\n<b>آخرین آگهی‌های فعال:</b>")
     active_all = sorted([a for a in ads if a["status"] == "active"],
                         key=lambda a: a["first_seen"] or "", reverse=True)[:10]
@@ -156,39 +178,34 @@ def search_text(con, query):
     return "\n".join(lines)
 
 
-def analysis_lines(con, ads, year):
-    """Market analysis for the most common model among the matched ads (Gilan only)."""
-    models = {}
-    for a in ads:
-        models[a["brand_model"]] = models.get(a["brand_model"], 0) + 1
-    if not models:
-        return []
-    bm = max(models, key=models.get)
+def analysis_lines(con, ad):
+    """Analysis for one exact-spec group; each factor varies alone, everything else equal."""
     out = []
-    pct, n = analytics.mileage_effect(con, bm)
+    pct, n = analytics.mileage_effect(con, ad)
     if pct is not None:
         out.append(f"• اثر کارکرد: هر ۱۰٬۰۰۰ کیلومتر حدود {fa_num(round(abs(pct), 1))}٪ ارزان‌تر "
                    f"({fa_num(n)} آگهی)")
-    dep, ny = analytics.year_depreciation(con, bm)
+    dep, ny = analytics.year_depreciation(con, ad)
     if dep is not None:
         out.append(f"• هر سال قدیمی‌تر: حدود {fa_num(round(dep, 1))}٪ ارزان‌تر ({fa_num(ny)} سال مقایسه شد)")
-    mf, nf, mn, nn = analytics.plate_gap(con, bm, year)
+    mf, nf, mn, nn = analytics.plate_gap(con, ad)
     if mf and mn:
         gap = round((mf - mn) * 100 / mn)
         out.append(f"• پلاک منطقه آزاد: {fmt_price(int(mf))} | پلاک ملی: {fmt_price(int(mn))} "
                    f"({'+' if gap > 0 else ''}{fa_num(gap)}٪)")
-    days, ns, label = analytics.sale_speed(con, bm)
+    days, ns, label = analytics.sale_speed(con, ad)
     if label:
         out.append(f"• سرعت فروش: {label} — میانه {fa_num(int(days))} روز ({fa_num(ns)} فروش)")
-    cur, old = analytics.supply(con, bm)
+    cur, old = analytics.supply(con, ad)
     if old >= 3:
         ch = round((cur - old) * 100 / old)
         out.append(f"• عرضه: {fa_num(cur)} آگهی فعال (هفتهٔ قبل {fa_num(old)}، "
                    f"{'+' if ch > 0 else ''}{fa_num(ch)}٪)")
-    md, nd, mp, np_ = analytics.seller_split(con, bm, year)
+    md, nd, mp, np_ = analytics.seller_split(con, ad)
     if md and mp:
         out.append(f"• نمایشگاه: {fmt_price(int(md))} ({fa_num(nd)}) | شخصی: {fmt_price(int(mp))} ({fa_num(np_)})")
-    head = f"\n📐 <b>تحلیل بازار گیلان — {escape_html(to_fa(bm))}</b>"
+    head = (f"\n📐 <b>تحلیل بازار گیلان — {escape_html(to_fa(ad['brand_model']))} {fa_num(ad['year'])}</b>\n"
+            f"({escape_html(analytics.describe(ad))})")
     return [head] + (out or ["دادهٔ کافی برای تحلیل هنوز جمع نشده؛ با گذشت چند روز کامل‌تر می‌شود."])
 
 
@@ -199,38 +216,40 @@ def to_fa(s):
 
 def estimate_text(con, query):
     words, year, mileage = parse_query(query)
-    if not words or not year:
-        return "برای تخمین، مدل و سال را بنویسید. مثال: <code>تخمین پرادو 2022 40000</code>"
+    if not words or not year or not mileage:
+        return ("برای تخمین، مدل، سال و کارکرد را بنویسید. "
+                "مثال: <code>تخمین پرادو 2022 40000</code>\n"
+                "برای دقت بیشتر رنگ یا نوع پلاک را هم بنویسید: <code>تخمین پرادو 2022 40000 سفید</code>")
     ads = [a for a in find_ads(con, words, year) if not a["zero_km"] and not a["duplicate_of"]]
-    pool = ads
-    note = ""
-    if mileage:
-        near = [a for a in ads if a["mileage"] and abs(a["mileage"] - mileage) <= 0.4 * mileage]
-        if len(stats.valid_prices([a["current_price"] for a in near])) >= 5:
-            pool, note = near, f" با کارکرد نزدیک به {fmt_int(mileage)} کیلومتر"
+    groups = {}
+    for a in ads:
+        key = analytics.spec_key(a)
+        if key is not None:
+            groups.setdefault(key, a)
+    rows = []
+    for rep in groups.values():
+        probe = dict(rep)
+        probe["token"] = "__estimate__"
+        probe["mileage"] = mileage
+        fair = analytics.fair_price(con, probe)
+        if fair:
+            n = len(analytics.similar(con, probe, skip=("mileage",)))
+            rows.append((n, fair, rep))
         else:
-            note = " (نمونهٔ کافی با کارکرد مشابه نبود؛ همهٔ کارکردها حساب شد)"
-    prices = stats.valid_prices([a["current_price"] for a in pool])
-    if len(prices) < 5:
-        return (f"برای «{escape_html(query)}» هنوز دادهٔ کافی ندارم "
-                f"({fa_num(len(prices))} آگهی؛ حداقل ۵ لازم است).")
-    lo, mid, hi = _pct(prices, 0.25), stats.median(prices), _pct(prices, 0.75)
-    if mileage and pool is ads:
-        models = {}
-        for a in ads:
-            models[a["brand_model"]] = models.get(a["brand_model"], 0) + 1
-        bm = max(models, key=models.get)
-        pct, _ = analytics.mileage_effect(con, bm)
-        kms = [a["mileage"] for a in ads if a["mileage"] is not None]
-        if pct is not None and kms:
-            factor = 1 + pct / 100 * (mileage - stats.median(kms)) / 10000
-            lo, mid, hi = lo * factor, mid * factor, hi * factor
-            note = f" (با اصلاح برای کارکرد {fmt_int(mileage)} کیلومتر)"
-    return (f"💡 <b>تخمین قیمت منصفانه</b>\n{escape_html(query)}{note}\n\n"
-            f"بازهٔ معقول: {fmt_price(int(lo))} تا {fmt_price(int(hi))}\n"
-            f"میانه: {fmt_price(int(mid))}\n"
-            f"بر اساس {fa_num(len(prices))} آگهی واقعی دیوار گیلان.\n"
-            "⚠️ این تخمین فقط از روی آگهی‌هاست؛ وضعیت فنی، رنگ و پلاک قیمت را جابه‌جا می‌کند.")
+            med, n = analytics.market(con, probe)
+            if med:
+                rows.append((n, int(med), rep))
+    if not rows:
+        return (f"برای «{escape_html(query)}» هنوز {fa_num(analytics.MIN_EXACT)} آگهی کاملاً مشابه "
+                "(همان رنگ، پلاک، وضعیت بدنه و … با کارکرد نزدیک) پیدا نکردم.")
+    rows.sort(key=lambda r: r[0], reverse=True)
+    lines = [f"💡 <b>تخمین قیمت منصفانه</b> — {escape_html(query)}",
+             f"برای کارکرد {fmt_int(mileage)} کیلومتر، جدا برای هر ترکیب مشخصات:"]
+    for n, value, rep in rows[:6]:
+        lines.append(f"• {escape_html(analytics.describe(rep))}: حدود {fmt_price(value)} "
+                     f"({fa_num(n)} آگهی مشابه)")
+    lines.append("⚠️ فقط از روی آگهی‌های کاملاً مشابه گیلان؛ مدارک و وضعیت فنی واقعی را جداگانه بررسی کنید.")
+    return "\n".join(lines)
 
 
 def weekly_series(con, tokens):
@@ -292,13 +311,14 @@ def chart_png(series, title):
 
 def send_chart(con, chat_id, query):
     words, year, _ = parse_query(query)
-    ads = [a for a in find_ads(con, words, year) if not a["zero_km"] and not a["duplicate_of"]]
+    groups, _ = groups_of(find_ads(con, words, year))
+    ads = groups[0] if groups else []
     series = weekly_series(con, [a["token"] for a in ads])
     if len(series) < 2:
         telegram.send_message(chat_id, f"📈 برای «{escape_html(query)}» هنوز دادهٔ کافی برای نمودار نیست "
                                        "(حداقل دو هفته با ۵ آگهی لازم است). چند روز دیگر دوباره امتحان کنید.")
         return
-    title = " ".join(words + ([str(year)] if year else []))
+    title = analytics.describe(ads[0])
     try:
         png = chart_png(series, "Price trend")
     except Exception as e:  # matplotlib missing or failed: send a text table instead
