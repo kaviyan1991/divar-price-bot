@@ -28,7 +28,7 @@ NIGHT_START_HOUR, NIGHT_END_HOUR = 1, 7
 # --- Price rules ---
 PRICE_FLOOR = 50_000_000          # toman; lower prices are treated as fake
 OUTLIER_LOW, OUTLIER_HIGH = 0.40, 2.50
-MIN_GROUP_SAMPLES = 5
+MIN_GROUP_SAMPLES = 3            # identical cars needed for a median
 BELOW_MARKET_RATIO = 0.85         # 15% or more below the median
 DUPLICATE_MILEAGE_TOL = 0.02
 DUPLICATE_PRICE_TOL = 0.10
