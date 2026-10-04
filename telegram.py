@@ -70,6 +70,13 @@ def edit_ad(message_id, caption, has_photo, button_url=None):
     return bool(r.get("ok"))
 
 
+def delete_ad(message_id):
+    r = _call("deleteMessage", {"chat_id": config.CHANNEL_ID, "message_id": message_id})
+    if not r.get("ok"):
+        print("delete failed:", r.get("description"))
+    return bool(r.get("ok"))
+
+
 def send_message(chat_id, text, keyboard=None):
     params = {"chat_id": chat_id, "text": text[:4096], "parse_mode": "HTML",
               "disable_web_page_preview": True}
