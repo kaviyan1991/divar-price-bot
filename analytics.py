@@ -1,6 +1,6 @@
-"""Market analytics for Gilan ads. Every comparison uses cars that are identical in
-every recorded spec: model, year, zero-km, plate type, fuel, gearbox, colour and the
-condition of body, engine, chassis and gearbox. Mileage must be close (used cars).
+"""Market analytics for Gilan ads. Every comparison uses cars that share: Divar model,
+production year, zero-km/used, plate type, fuel, gearbox type and colour.
+Mileage and body/engine/chassis/gearbox condition are NOT matched (owner's decision).
 Analyses that study one factor (mileage, year, plate, seller) keep all other specs equal."""
 import datetime as dt
 
@@ -9,8 +9,7 @@ import stats
 
 HOT_DAYS, NORMAL_DAYS = 7, 21
 DEALER_WORDS = ("نمایشگاه", "اتوگالری", "اتو گالری", "گالری", "نمایندگی", "autogallery")
-SPEC_FIELDS = ("brand_model", "year", "zero_km", "customs", "fuel", "gearbox", "color",
-               "body", "engine", "chassis", "gearbox_cond")
+SPEC_FIELDS = ("brand_model", "year", "zero_km", "customs", "fuel", "gearbox", "color")
 LABELS = {"customs": "نوع پلاک", "fuel": "سوخت", "gearbox": "گیربکس", "color": "رنگ",
           "body": "وضعیت بدنه", "engine": "وضعیت موتور", "chassis": "وضعیت شاسی",
           "gearbox_cond": "وضعیت گیربکس", "brand_model": "مدل", "year": "سال"}
@@ -63,8 +62,6 @@ def similar(con, ad, skip=(), statuses=("active", "removed"), include_self=False
         if r["token"] == ad["token"] and not include_self:
             continue
         if spec_key(r, skip) != key:
-            continue
-        if "mileage" not in skip and not mileage_close(ad, r):
             continue
         out.append(r)
     return out
@@ -199,7 +196,7 @@ def seller_split(con, ad):
 
 def describe(ad):
     """Short spec line of a comparison group."""
-    parts = [ad["color"], ad["customs"], "بدنه: " + (ad["body"] or "؟")]
+    parts = [ad["color"], ad["customs"]]
     if ad["fuel"] and ad["fuel"] != "بنزین":
         parts.append(ad["fuel"])
     return " | ".join(p for p in parts if p)
