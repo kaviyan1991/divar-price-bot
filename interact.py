@@ -116,7 +116,7 @@ def groups_of(ads):
         if key is None:
             incomplete += 1
             continue
-        groups.setdefault(key + (_bucket(a),), []).append(a)
+        groups.setdefault(key, []).append(a)
     return sorted(groups.values(), key=len, reverse=True), incomplete
 
 
@@ -129,13 +129,13 @@ def search_text(con, query):
     groups, incomplete = groups_of(ads)
     lines = [f"📊 <b>نتیجه برای «{escape_html(query)}»</b>",
              "فقط ماشین‌های کاملاً مشابه با هم مقایسه می‌شوند "
-             "(مدل، سال، پلاک، سوخت، گیربکس، رنگ، وضعیت بدنه/موتور/شاسی/گیربکس و کارکرد نزدیک)."]
+             "(مدل، سال، صفر یا کارکرده، نوع پلاک، سوخت، گیربکس و رنگ)."]
     for grp in groups[:6]:
         a0 = grp[0]
         active = [a for a in grp if a["status"] == "active"]
         removed = [a for a in grp if a["status"] == "removed"]
         head = (f"\n<b>{escape_html(to_fa(a0['brand_model']))} {fa_num(a0['year'])}</b> — "
-                f"{escape_html(analytics.describe(a0))} | {_bucket(a0)}")
+                f"{escape_html(analytics.describe(a0))}" + (" | صفر کیلومتر" if a0["zero_km"] else ""))
         lines.append(head)
         cur, n = analytics._median_min([a["current_price"] for a in active], analytics.MIN_EXACT)
         first, _ = analytics._median_min([a["first_price"] for a in active], analytics.MIN_EXACT)
@@ -241,7 +241,7 @@ def estimate_text(con, query):
                 rows.append((n, int(med), rep))
     if not rows:
         return (f"برای «{escape_html(query)}» هنوز {fa_num(analytics.MIN_EXACT)} آگهی کاملاً مشابه "
-                "(همان رنگ، پلاک، وضعیت بدنه و … با کارکرد نزدیک) پیدا نکردم.")
+                "(همان مدل، سال، رنگ، نوع پلاک، سوخت و گیربکس) پیدا نکردم.")
     rows.sort(key=lambda r: r[0], reverse=True)
     lines = [f"💡 <b>تخمین قیمت منصفانه</b> — {escape_html(query)}",
              f"برای کارکرد {fmt_int(mileage)} کیلومتر، جدا برای هر ترکیب مشخصات:"]
