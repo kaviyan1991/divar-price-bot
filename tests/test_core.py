@@ -226,6 +226,17 @@ class ExactMatchTests(unittest.TestCase):
         self.assertIn("سرعت فروش این مدل: داغ", main.caption(self.con, w0))
 
 
+class NoPriceTests(unittest.TestCase):
+    def test_only_priced_ads_are_posted(self):
+        con = db.connect(":memory:")
+        _add(con, "priced")
+        _add(con, "negotiable", current_price=None, first_price=None)
+        _add(con, "zero", current_price=0, first_price=0)
+        self.assertEqual([r["token"] for r in main.postable(con)], ["priced"])
+        con.execute("UPDATE ads SET current_price=4800000000 WHERE token='negotiable'")
+        self.assertEqual({r["token"] for r in main.postable(con)}, {"priced", "negotiable"})
+
+
 class DailyTests(unittest.TestCase):
     def test_jalali(self):
         self.assertEqual(report.g2j(2026, 10, 1), (1405, 7, 9))
