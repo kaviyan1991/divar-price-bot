@@ -231,7 +231,12 @@ def update_post(con, token):
         # No real price: take the post down; it is posted again once a price is added.
         if telegram.delete_ad(ad["message_id"]):
             con.execute("UPDATE ads SET message_id=NULL, has_photo=0 WHERE token=?", (token,))
-        return
+            return True
+        # Telegram only lets bots delete posts younger than 48 hours: mark it clearly instead.
+        note = "⛔ <b>قیمت ندارد</b> — تا وقتی فروشنده قیمت نگذارد، این آگهی معتبر نیست.\n\n"
+        telegram.edit_ad(ad["message_id"], (note + caption(con, ad))[:1024],
+                         bool(ad["has_photo"]), ad_url(ad))
+        return False
     telegram.edit_ad(ad["message_id"], caption(con, ad), bool(ad["has_photo"]), ad_url(ad))
 
 
@@ -248,14 +253,13 @@ def fixups(con):
         db.set_state(con, "layout_version", "2")
         con.commit()
         print(f"fixups: {len(rows)} old post(s) re-formatted")
-    if db.get_state(con, "noprice_cleanup") != "1" and not config.DRY_RUN:
+    if db.get_state(con, "noprice_cleanup") != "2" and not config.DRY_RUN:
         rows = con.execute("SELECT token FROM ads WHERE message_id IS NOT NULL AND "
                            "(current_price IS NULL OR current_price < ?)", (config.PRICE_FLOOR,)).fetchall()
-        for r in rows:
-            update_post(con, r["token"])
-        db.set_state(con, "noprice_cleanup", "1")
+        deleted = sum(1 for r in rows if update_post(con, r["token"]))
+        db.set_state(con, "noprice_cleanup", "2")
         con.commit()
-        print(f"fixups: {len(rows)} post(s) without price removed from the channel")
+        print(f"fixups: {deleted} of {len(rows)} post(s) without price deleted; the rest were marked")
 
 
 def postable(con):
