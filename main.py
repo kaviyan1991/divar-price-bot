@@ -148,7 +148,8 @@ def recheck(con):
                  d.get("gearbox_cond"), divar.customs_status(text), analytics.seller_type(text),
                  d.get("photo") or None, r["token"]))
             if price is not None and price != r["current_price"]:
-                con.execute("UPDATE ads SET current_price=? WHERE token=?", (price, r["token"]))
+                con.execute("UPDATE ads SET current_price=?, first_price=COALESCE(first_price, ?) "
+                            "WHERE token=?", (price, price, r["token"]))
                 db.add_price(con, r["token"], t, price)
                 changed += 1
             update_post(con, r["token"])  # specs/market may have changed
@@ -218,9 +219,18 @@ def caption(con, ad):
     return "\n".join(lines)[:1024]
 
 
+def has_price(ad):
+    return ad["current_price"] is not None and ad["current_price"] >= config.PRICE_FLOOR
+
+
 def update_post(con, token):
     ad = con.execute("SELECT * FROM ads WHERE token=?", (token,)).fetchone()
     if not ad or not ad["message_id"] or config.DRY_RUN:
+        return
+    if not has_price(ad):
+        # No real price: take the post down; it is posted again once a price is added.
+        if telegram.delete_ad(ad["message_id"]):
+            con.execute("UPDATE ads SET message_id=NULL, has_photo=0 WHERE token=?", (token,))
         return
     telegram.edit_ad(ad["message_id"], caption(con, ad), bool(ad["has_photo"]), ad_url(ad))
 
@@ -238,12 +248,25 @@ def fixups(con):
         db.set_state(con, "layout_version", "2")
         con.commit()
         print(f"fixups: {len(rows)} old post(s) re-formatted")
+    if db.get_state(con, "noprice_cleanup") != "1" and not config.DRY_RUN:
+        rows = con.execute("SELECT token FROM ads WHERE message_id IS NOT NULL AND "
+                           "(current_price IS NULL OR current_price < ?)", (config.PRICE_FLOOR,)).fetchall()
+        for r in rows:
+            update_post(con, r["token"])
+        db.set_state(con, "noprice_cleanup", "1")
+        con.commit()
+        print(f"fixups: {len(rows)} post(s) without price removed from the channel")
+
+
+def postable(con):
+    """Active new ads with a real price that are not in the channel yet."""
+    return con.execute("SELECT * FROM ads WHERE status='active' AND post_eligible=1 AND "
+                       "message_id IS NULL AND current_price >= ? ORDER BY first_seen ASC LIMIT ?",
+                       (config.PRICE_FLOOR, config.POSTS_PER_RUN)).fetchall()
 
 
 def post_new(con):
-    rows = con.execute("SELECT * FROM ads WHERE status='active' AND post_eligible=1 AND "
-                       "message_id IS NULL ORDER BY first_seen ASC LIMIT ?",
-                       (config.POSTS_PER_RUN,)).fetchall()
+    rows = postable(con)
     for ad in rows:
         cap = caption(con, ad)
         med, _ = market(con, ad)
