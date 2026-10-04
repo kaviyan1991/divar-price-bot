@@ -61,15 +61,14 @@ def build(con, now):
 
 
 def exact_groups(con):
-    """Groups of identical cars (every spec equal, mileage in the same 20k band)."""
+    """Groups of cars that share every compared spec."""
     groups = {}
     for a in con.execute("SELECT * FROM ads WHERE duplicate_of IS NULL "
                          "AND status IN ('active','removed') AND brand_model IS NOT NULL"):
         key = analytics.spec_key(a)
         if key is None:
             continue
-        band = -1 if a["zero_km"] else (a["mileage"] or 0) // 20000
-        groups.setdefault(key + (band,), []).append(a)
+        groups.setdefault(key, []).append(a)
     return list(groups.values())
 
 
