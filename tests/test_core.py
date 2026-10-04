@@ -149,6 +149,7 @@ class BotTests(unittest.TestCase):
         est = interact.estimate_text(con, "تخمین پرادو 2022 41000 سفید")
         self.assertIn("حدود", est)
         self.assertIn("پیدا نکردم", interact.estimate_text(con, "تخمین پرادو 2022 41000 مشکی"))
+        self.assertNotIn("کارکرد نزدیک", txt)
 
     def test_watch_match(self):
         con = db.connect(":memory:")
@@ -183,9 +184,10 @@ class ExactMatchTests(unittest.TestCase):
     def test_only_identical_cars_are_compared(self):
         ad = self.con.execute("SELECT * FROM ads WHERE token='w0'").fetchone()
         tokens = {r["token"] for r in self.an.similar(self.con, ad)}
-        self.assertEqual(tokens, {"w1", "w2", "w3"})
+        # body condition and mileage are not compared any more
+        self.assertEqual(tokens, {"w1", "w2", "w3", "painted", "far_km"})
         med, n = self.an.market(self.con, ad)
-        self.assertEqual(n, 3)
+        self.assertEqual(n, 5)
 
     def test_unknown_spec_is_never_compared(self):
         ad = self.con.execute("SELECT * FROM ads WHERE token='unknown'").fetchone()
@@ -208,9 +210,9 @@ class ExactMatchTests(unittest.TestCase):
         w0 = self.con.execute("SELECT * FROM ads WHERE token='w0'").fetchone()
         mf, nf, mn, nn = self.an.plate_gap(self.con, w0)
         self.assertEqual(nf, 1)   # only 'free' differs by plate; 'unknown' is excluded
-        self.assertEqual(nn, 4)
+        self.assertEqual(nn, 6)
         pct, n = self.an.mileage_effect(self.con, w0)
-        self.assertEqual(n, 5)    # w0..w3 + far_km (identical except mileage)
+        self.assertEqual(n, 6)    # every white national-plate 2022 Prado, any mileage/condition
         self.assertLess(pct, 0)
         self.assertIsNotNone(self.an.fair_price(self.con, w0))
         self.assertEqual(self.an.seller_type("فروش در نمایشگاه اتو پارس"), "نمایشگاه")
