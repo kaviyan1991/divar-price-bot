@@ -146,11 +146,16 @@ def parse_detail(j):
     }
 
 
+FREE_ZONE = "پلاک منطقه آزاد"
+NATIONAL = "پلاک ملی"
+
+
 def customs_status(text):
+    """Only two cases (owner's rule): national plate if the ad says so, otherwise free zone."""
     t = text or ""
     if any(k in t for k in ("منطقه آزاد", "منطقه ازاد", "گذر موقت", "پلاک موقت", "پلاک منطقه",
                             "پلاک انزلی", "پلاک آزاد", "پلاک ازاد", "منطقه‌آزاد")):
-        return "منطقه آزاد / گذر موقت"
+        return FREE_ZONE
     if any(k in t for k in ("پلاک ملی", "ملی شده", "پلاک شخصی ملی", "پلاک دائم", "پلاک دائمی")):
-        return "پلاک ملی"
-    return "نامشخص"
+        return NATIONAL
+    return FREE_ZONE
