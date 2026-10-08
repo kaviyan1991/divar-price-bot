@@ -73,7 +73,9 @@ class DetailTests(unittest.TestCase):
         self.assertEqual(d["price"], 19200000000)
         self.assertEqual(d["brand_model"], "تویوتا لندکروزر ۴ در 4000cc")
         self.assertEqual(d["body"], "سالم و بی‌خط و خش")
-        self.assertEqual(divar.customs_status(d["description"]), "منطقه آزاد / گذر موقت")
+        self.assertEqual(divar.customs_status(d["description"]), "پلاک منطقه آزاد")
+        self.assertEqual(divar.customs_status("فول کم کارکرد"), "پلاک منطقه آزاد")
+        self.assertEqual(divar.customs_status("پلاک ملی رشت"), "پلاک ملی")
 
     def test_pipeline_in_memory(self):
         con = db.connect(":memory:")
@@ -144,7 +146,7 @@ class BotTests(unittest.TestCase):
         con = db.connect(":memory:")
         _fill(con)
         txt = interact.search_text(con, "پرادو 2022")
-        self.assertIn("میانه قیمت فعلی", txt)
+        self.assertIn("میانگین قیمت فعلی", txt)
         self.assertIn("divar.ir/v/p0", txt)
         est = interact.estimate_text(con, "تخمین پرادو 2022 41000 سفید")
         self.assertIn("حدود", est)
@@ -176,10 +178,10 @@ class ExactMatchTests(unittest.TestCase):
         for i in range(4):
             _add(self.con, f"w{i}", mileage=40000 + i * 2000, current_price=5_000_000_000 + i * 50_000_000)
         _add(self.con, "black", color="مشکی", current_price=9_000_000_000)
-        _add(self.con, "free", customs="منطقه آزاد / گذر موقت", current_price=4_000_000_000)
+        _add(self.con, "free", customs="پلاک منطقه آزاد", current_price=4_000_000_000)
         _add(self.con, "painted", body="رنگ‌شدگی در ۱ ناحیه", current_price=4_200_000_000)
         _add(self.con, "far_km", mileage=150000, current_price=3_000_000_000)
-        _add(self.con, "unknown", customs="نامشخص")
+        _add(self.con, "unknown", color="")
 
     def test_only_identical_cars_are_compared(self):
         ad = self.con.execute("SELECT * FROM ads WHERE token='w0'").fetchone()
@@ -192,7 +194,7 @@ class ExactMatchTests(unittest.TestCase):
     def test_unknown_spec_is_never_compared(self):
         ad = self.con.execute("SELECT * FROM ads WHERE token='unknown'").fetchone()
         self.assertEqual(self.an.market(self.con, ad), (None, 0))
-        self.assertIn("نامشخص: نوع پلاک", self.an.market_status(self.con, ad))
+        self.assertIn("نامشخص: رنگ", self.an.market_status(self.con, ad))
         w0 = self.con.execute("SELECT * FROM ads WHERE token='w0'").fetchone()
         self.assertNotIn("unknown", {r["token"] for r in self.an.similar(self.con, w0)})
 
