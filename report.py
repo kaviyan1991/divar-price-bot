@@ -55,7 +55,7 @@ def build(con, now):
                   for p, bm, y, m in downs]
     if not ups and not downs:
         lines.append("\nقیمت‌ها این هفته تقریباً ثابت بودند.")
-    lines.append("\n(بر اساس میانهٔ قیمت؛ فقط مدل‌هایی که حداقل ۵ آگهی دارند)")
+    lines.append("\n(بر اساس میانگین قیمت ماشین‌های کاملاً مشابه)")
     lines += market_lines(con, now)
     return "\n".join(lines)
 
@@ -185,7 +185,7 @@ def build_daily(con, day):
         lines.append("\n🔻 <b>زیر قیمت بازار امروز:</b>")
         for pct, ad in sorted(below, key=lambda x: x[0], reverse=True)[:5]:
             lines.append(f"• <a href=\"https://divar.ir/v/{ad['token']}\">{escape_html(ad['brand_model'])} "
-                         f"{fa_num(ad['year'])}</a> — {fa_num(round(pct))}٪ زیر میانه")
+                         f"{fa_num(ad['year'])}</a> — {fa_num(round(pct))}٪ زیر میانگین")
     if drops:
         lines.append("\n📉 <b>بیشترین کاهش قیمت امروز:</b>")
         for pct, ad, first, last in sorted(drops, key=lambda x: x[0], reverse=True)[:3]:
