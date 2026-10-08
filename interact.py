@@ -142,13 +142,13 @@ def search_text(con, query):
         last, nl = analytics._median_min([a["current_price"] for a in removed], analytics.MIN_EXACT)
         lines.append(f"• فعال: {fa_num(len(active))} | حذف‌شده: {fa_num(len(removed))}")
         if cur:
-            lines.append(f"• میانه قیمت فعلی: {fmt_price(int(cur))}")
+            lines.append(f"• میانگین قیمت فعلی: {fmt_price(int(cur))}")
         if first:
-            lines.append(f"• میانه قیمت اولیه: {fmt_price(int(first))}")
+            lines.append(f"• میانگین قیمت اولیه: {fmt_price(int(first))}")
         if last:
-            lines.append(f"• میانه آخرین قیمت حذف‌شده‌ها: {fmt_price(int(last))}")
+            lines.append(f"• میانگین آخرین قیمت حذف‌شده‌ها: {fmt_price(int(last))}")
         if not cur:
-            lines.append(f"• کمتر از {fa_num(analytics.MIN_EXACT)} آگهی کاملاً مشابه؛ میانه حساب نشد.")
+            lines.append(f"• کمتر از {fa_num(analytics.MIN_EXACT)} آگهی کاملاً مشابه؛ میانگین حساب نشد.")
     if len(groups) > 6:
         lines.append(f"\n… و {fa_num(len(groups) - 6)} گروه دیگر با مشخصات متفاوت.")
     if incomplete:
