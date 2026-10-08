@@ -30,7 +30,9 @@ jobs:
             echo "no data branch yet: starting a new database"
           fi
       - name: Install chart library
-        run: pip install --quiet matplotlib
+        timeout-minutes: 2
+        continue-on-error: true
+        run: pip install --quiet --timeout 30 --retries 1 matplotlib
       - name: Tests
         run: python3 -m unittest discover -s tests
       - name: Run bot
