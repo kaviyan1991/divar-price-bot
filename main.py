@@ -199,9 +199,9 @@ def caption(con, ad):
         if ok_price:
             diff = round((price - med) * 100 / med)
             tail = f" ({'+' if diff > 0 else ''}{to_fa_digits(diff)}٪)"
-        lines.append(f"📊 میانه بازار ({to_fa_digits(n)} آگهی کاملاً مشابه): {fmt_price(int(med))}{tail}")
+        lines.append(f"📊 میانگین بازار ({to_fa_digits(n)} آگهی کاملاً مشابه): {fmt_price(int(med))}{tail}")
     else:
-        lines.append(f"📊 میانه بازار: {to_fa_digits(analytics.market_status(con, ad) or 'دادهٔ کافی نیست')}")
+        lines.append(f"📊 میانگین بازار: {to_fa_digits(analytics.market_status(con, ad) or 'دادهٔ کافی نیست')}")
     fair = analytics.fair_price(con, ad)
     if fair:
         lines.append(f"⚖️ قیمت منصفانه با این کارکرد: {fmt_price(fair)}")
@@ -243,6 +243,9 @@ def update_post(con, token):
 def fixups(con):
     """One-time repairs of data written by older versions."""
     con.execute("UPDATE ads SET year = year % 10000 WHERE year > 9999")
+    # Plate rule: anything not explicitly national is a free-zone (Anzali) plate.
+    con.execute("UPDATE ads SET customs='پلاک منطقه آزاد' WHERE customs IS NULL OR "
+                "customs IN ('نامشخص', 'منطقه آزاد / گذر موقت')")
     con.execute("UPDATE ads SET status='skipped' WHERE status IN ('active','pending') "
                 "AND year IS NOT NULL AND year < ?", (config.MIN_YEAR,))
     con.commit()
