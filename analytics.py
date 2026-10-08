@@ -72,8 +72,9 @@ def _ok(p):
 
 
 def _median_min(prices, n_min):
+    """Average of real prices (fake prices and outliers removed first)."""
     vp = stats.valid_prices(prices)
-    return (stats.median(vp), len(vp)) if len(vp) >= n_min else (None, len(vp))
+    return (sum(vp) / len(vp), len(vp)) if len(vp) >= n_min else (None, len(vp))
 
 
 def market(con, ad):
@@ -149,7 +150,7 @@ def year_depreciation(con, ad):
 def plate_gap(con, ad):
     """Medians for free-zone vs national plate, all other specs identical."""
     rows = similar(con, ad, skip=("customs",), statuses=("active",), include_self=True)
-    free = [r["current_price"] for r in rows if (r["customs"] or "").startswith("منطقه")]
+    free = [r["current_price"] for r in rows if "منطقه" in (r["customs"] or "")]
     nat = [r["current_price"] for r in rows if r["customs"] == "پلاک ملی"]
     mf, nf = _median_min(free, 2)
     mn, nn = _median_min(nat, 2)
