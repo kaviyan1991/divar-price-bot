@@ -191,6 +191,11 @@ class ExactMatchTests(unittest.TestCase):
         med, n = self.an.market(self.con, ad)
         self.assertEqual(n, 5)
 
+    def test_gearbox_is_not_compared(self):
+        _add(self.con, "no_gearbox", gearbox="")
+        ad = self.con.execute("SELECT * FROM ads WHERE token='w0'").fetchone()
+        self.assertIn("no_gearbox", {r["token"] for r in self.an.similar(self.con, ad)})
+
     def test_unknown_spec_is_never_compared(self):
         ad = self.con.execute("SELECT * FROM ads WHERE token='unknown'").fetchone()
         self.assertEqual(self.an.market(self.con, ad), (None, 0))
