@@ -129,7 +129,7 @@ def search_text(con, query):
     groups, incomplete = groups_of(ads)
     lines = [f"📊 <b>نتیجه برای «{escape_html(query)}»</b>",
              "فقط ماشین‌های کاملاً مشابه با هم مقایسه می‌شوند "
-             "(مدل، سال، صفر یا کارکرده، نوع پلاک، سوخت، گیربکس و رنگ)."]
+             "(مدل، سال، صفر یا کارکرده، نوع پلاک، سوخت و رنگ)."]
     for grp in groups[:6]:
         a0 = grp[0]
         active = [a for a in grp if a["status"] == "active"]
@@ -241,7 +241,7 @@ def estimate_text(con, query):
                 rows.append((n, int(med), rep))
     if not rows:
         return (f"برای «{escape_html(query)}» هنوز {fa_num(analytics.MIN_EXACT)} آگهی کاملاً مشابه "
-                "(همان مدل، سال، رنگ، نوع پلاک، سوخت و گیربکس) پیدا نکردم.")
+                "(همان مدل، سال، رنگ، نوع پلاک و سوخت) پیدا نکردم.")
     rows.sort(key=lambda r: r[0], reverse=True)
     lines = [f"💡 <b>تخمین قیمت منصفانه</b> — {escape_html(query)}",
              f"برای کارکرد {fmt_int(mileage)} کیلومتر، جدا برای هر ترکیب مشخصات:"]
