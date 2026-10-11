@@ -1,6 +1,6 @@
 """Market analytics for Gilan ads. Every comparison uses cars that share: Divar model,
-production year, zero-km/used, plate type, fuel, gearbox type and colour.
-Mileage and body/engine/chassis/gearbox condition are NOT matched (owner's decision).
+production year, zero-km/used, plate type, fuel and colour.
+Mileage, gearbox and body/engine/chassis/gearbox condition are NOT matched (owner's decision).
 Analyses that study one factor (mileage, year, plate, seller) keep all other specs equal."""
 import datetime as dt
 
@@ -9,7 +9,7 @@ import stats
 
 HOT_DAYS, NORMAL_DAYS = 7, 21
 DEALER_WORDS = ("نمایشگاه", "اتوگالری", "اتو گالری", "گالری", "نمایندگی", "autogallery")
-SPEC_FIELDS = ("brand_model", "year", "zero_km", "customs", "fuel", "gearbox", "color")
+SPEC_FIELDS = ("brand_model", "year", "zero_km", "customs", "fuel", "color")
 LABELS = {"customs": "نوع پلاک", "fuel": "سوخت", "gearbox": "گیربکس", "color": "رنگ",
           "body": "وضعیت بدنه", "engine": "وضعیت موتور", "chassis": "وضعیت شاسی",
           "gearbox_cond": "وضعیت گیربکس", "brand_model": "مدل", "year": "سال"}
