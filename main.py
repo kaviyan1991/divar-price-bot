@@ -3,6 +3,7 @@ import datetime as dt
 import os
 import sys
 
+import admin
 import analytics
 import config
 import db
@@ -62,6 +63,7 @@ def crawl_list(con, backfill):
     if backfill:
         db.set_state(con, "backfill_done", "1")
     con.commit()
+    admin.add_counter(con, "new", added)
     print(f"list: {pages} page(s), {added} new ad(s) stored")
 
 
@@ -150,6 +152,7 @@ def recheck(con):
                  d.get("gearbox_cond"), divar.customs_status(text), analytics.seller_type(text),
                  d.get("photo") or None, r["token"]))
             if price is not None and price != r["current_price"]:
+                notify_price_drop(con, r, price)
                 con.execute("UPDATE ads SET current_price=?, first_price=CASE WHEN first_price IS NULL "
                             "OR first_price < ? THEN ? ELSE first_price END WHERE token=?",
                             (price, config.PRICE_FLOOR, price, r["token"]))
@@ -161,6 +164,19 @@ def recheck(con):
 
 
 # ---------- channel ----------
+
+def notify_price_drop(con, ad, new_price):
+    """Short reply under the channel post when the price drops (members don't notice edits)."""
+    old = ad["current_price"]
+    if (config.DRY_RUN or not ad["message_id"] or not old or old < config.PRICE_FLOOR
+            or new_price < config.PRICE_FLOOR or new_price >= old):
+        return
+    pct = (old - new_price) * 100 / old
+    if pct < config.PRICE_DROP_NOTIFY_PCT:
+        return
+    telegram.send_message(config.CHANNEL_ID,
+                          f"📉 <b>کاهش قیمت</b>: {fmt_price(old)} ← {fmt_price(new_price)} "
+                          f"(−{to_fa_digits(round(pct))}٪)", reply_to=ad["message_id"])
 
 def market(con, ad):
     return analytics.market(con, ad)
@@ -190,19 +206,30 @@ def caption(con, ad):
         ("📄", "پلاک", ad["customs"] or "؟"),
         ("📍", "شهر", ad["city"] or "گیلان"),
     ]
-    lines += [f"{icon} {label}: {escape_html(str(value))}" for icon, label, value in specs]
+    hidden = ("؟", "", "تعیین‌نشده", "تعیین نشده")   # skip unknown specs to keep the card tidy
+    lines += [f"{icon} {label}: {escape_html(str(value))}" for icon, label, value in specs
+              if str(value).strip() not in hidden]
     lines += ["", f"💰 قیمت اولیه: {fmt_price(ad['first_price'])}"]
     first = ad["first_price"]
     if ok_price and first and first >= config.PRICE_FLOOR and price != first:
         pct = round((price - first) * 100 / first)
         arrow = "🔻" if pct < 0 else "🔺"
         lines.append(f"💰 قیمت فعلی: {fmt_price(price)} ({arrow}{to_fa_digits(abs(pct))}٪)")
-    if med:
+    if med and analytics.unrealistic(price, med):
+        lines.append(f"📊 میانگین بازار: {fmt_price(int(med))}")
+        lines.append("⚠️ قیمت این آگهی با بازار جور نیست (احتمالاً قیمت واقعی نیست)")
+    elif med:
         tail = ""
         if ok_price:
             diff = round((price - med) * 100 / med)
             tail = f" ({'+' if diff > 0 else ''}{to_fa_digits(diff)}٪)"
-        lines.append(f"📊 میانگین بازار ({to_fa_digits(n)} آگهی کاملاً مشابه): {fmt_price(int(med))}{tail}")
+        same, other = analytics.color_split(con, ad)
+        lines.append(f"📊 میانگین بازار: {fmt_price(int(med))}{tail}")
+        lines.append(f"🔎 از {to_fa_digits(n)} آگهی مشابه ({to_fa_digits(same)} هم‌رنگ، "
+                     f"{to_fa_digits(other)} رنگ دیگر)")
+        stars, label = analytics.deal_stars(price, med)
+        if stars:
+            lines.append(f"🏅 امتیاز معامله: {'⭐' * stars} ({label})")
     else:
         lines.append(f"📊 میانگین بازار: {to_fa_digits(analytics.market_status(con, ad) or 'دادهٔ کافی نیست')}")
     fair = analytics.fair_price(con, ad)
@@ -214,7 +241,12 @@ def caption(con, ad):
     if stats.is_below_market(price, med):
         lines.append("🔻 زیر قیمت بازار")
     if ad["duplicate_of"]:
-        lines.append("🔁 احتمالاً تکراری")
+        orig = con.execute("SELECT current_price, first_seen FROM ads WHERE token=?",
+                           (ad["duplicate_of"],)).fetchone()
+        if orig and orig["current_price"] and orig["current_price"] >= config.PRICE_FLOOR:
+            lines.append(f"🔁 این ماشین قبلاً با قیمت {fmt_price(orig['current_price'])} آگهی شده بود")
+        else:
+            lines.append("🔁 این ماشین قبلاً هم آگهی شده بود")
     if ad["status"] == "removed":
         days = days_between(ad["first_seen"], ad["removed_at"])
         lines.append(f"❌ آگهی حذف شد (احتمالاً فروخته شد) بعد از {to_fa_digits(days)} روز")
@@ -222,15 +254,23 @@ def caption(con, ad):
     return "\n".join(lines)[:1024]
 
 
-def has_price(ad):
-    return ad["current_price"] is not None and ad["current_price"] >= config.PRICE_FLOOR
+def has_price(ad, con=None):
+    """A real price: above the floor and not a placeholder far from similar cars."""
+    p = ad["current_price"]
+    if p is None or p < config.PRICE_FLOOR:
+        return False
+    if con is not None:
+        avg, _ = analytics.market(con, ad)
+        if analytics.unrealistic(p, avg):
+            return False
+    return True
 
 
 def update_post(con, token):
     ad = con.execute("SELECT * FROM ads WHERE token=?", (token,)).fetchone()
     if not ad or not ad["message_id"] or config.DRY_RUN:
         return
-    if not has_price(ad):
+    if not has_price(ad, con):
         # No real price: take the post down; it is posted again once a price is added.
         if telegram.delete_ad(ad["message_id"]):
             con.execute("UPDATE ads SET message_id=NULL, has_photo=0 WHERE token=?", (token,))
@@ -277,11 +317,19 @@ def postable(con):
     """Active new ads with a real price that are not in the channel yet."""
     return con.execute("SELECT * FROM ads WHERE status='active' AND post_eligible=1 AND "
                        "message_id IS NULL AND current_price >= ? ORDER BY first_seen ASC LIMIT ?",
-                       (config.PRICE_FLOOR, config.POSTS_PER_RUN)).fetchall()
+                       (config.PRICE_FLOOR, config.POSTS_PER_RUN * 10)).fetchall()
 
 
 def post_new(con):
-    rows = postable(con)
+    if db.get_state(con, "force_one") == "1":  # /testpost from the admin
+        con.execute("UPDATE ads SET post_eligible=1 WHERE token=(SELECT token FROM ads WHERE "
+                    "status='active' AND message_id IS NULL AND current_price >= ? "
+                    "ORDER BY first_seen DESC LIMIT 1)", (config.PRICE_FLOOR,))
+        db.set_state(con, "force_one", "0")
+    elif db.get_state(con, "paused") == "1":
+        print("channel: paused by admin")
+        return
+    rows = [ad for ad in postable(con) if has_price(ad, con)][:config.POSTS_PER_RUN]
     for ad in rows:
         cap = caption(con, ad)
         med, _ = market(con, ad)
@@ -296,6 +344,7 @@ def post_new(con):
             con.execute("UPDATE ads SET message_id=?, has_photo=? WHERE token=?",
                         (mid, 1 if photo else 0, ad["token"]))
             interact.notify_watchers(con, ad, cap)
+            admin.add_counter(con, "posts")
         con.commit()
     print(f"channel: {len(rows)} new post(s)")
 
@@ -319,6 +368,7 @@ def main():
         print("BOT_TOKEN is missing")
         return 1
     con = db.connect(config.DB_PATH)
+    admin.count_run(con)
     if os.environ.get("FORCE_POST_ONE") == "1":  # manual test: post the newest ad now
         con.execute("UPDATE ads SET post_eligible=1 WHERE token=(SELECT token FROM ads WHERE "
                     "status='active' AND message_id IS NULL ORDER BY first_seen DESC LIMIT 1)")
@@ -341,10 +391,13 @@ def main():
                  ).strftime("%Y-%m-%dT%H:%M:%SZ")
         db.set_state(con, "backoff_until", until)
         print("BLOCKED by Divar:", e, "- pausing until", until)
+        admin.add_counter(con, "blocks")
+        admin.notify(f"⚠️ دیوار درخواست‌های ربات را رد کرد ({e}). تا {until} جمع‌آوری متوقف می‌شود.")
     con.commit()
     post_new(con)
     report.maybe_post(con)
     report.maybe_post_daily(con)
+    admin.maybe_daily_health(con)
     interact.process_updates(con)
     con.commit()
     total = con.execute("SELECT status, COUNT(*) FROM ads GROUP BY status").fetchall()
@@ -353,5 +406,19 @@ def main():
     return 0
 
 
+def run():
+    try:
+        return main()
+    except Exception as e:  # tell the owner, then fail the run so it shows red in GitHub
+        try:
+            con = db.connect(config.DB_PATH)
+            admin.add_counter(con, "errors")
+            con.commit()
+        except Exception:
+            pass
+        admin.notify(f"❌ خطا در اجرای ربات: <code>{escape_html(repr(e))[:300]}</code>")
+        raise
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())
