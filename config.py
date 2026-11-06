@@ -39,5 +39,8 @@ REMOVAL_MISSES = 2                # consecutive "not found" checks before markin
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "-1004396296582")   # "Divar Car Price"
 
+ADMIN_ID = os.environ.get("ADMIN_ID", "").strip()   # owner's Telegram user id (GitHub secret)
+PRICE_DROP_NOTIFY_PCT = 3          # reply in the channel when a price drops at least this much
+
 DB_PATH = os.environ.get("DB_PATH", "ads.db")
 DRY_RUN = os.environ.get("DRY_RUN", "") == "1"
