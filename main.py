@@ -75,7 +75,9 @@ def apply_detail(con, token, d):
     price = d["price"] if d["price"] is not None else row["list_price"]
     words = d["brand_model"].split()
     customs = divar.customs_status((row["title"] or "") + " " + (d["description"] or ""))
-    zero = 1 if (d["mileage"] == 0 or "صفر" in (row["title"] or "")) else 0
+    # Zero-km comes from the mileage field; the title is used only when mileage is missing
+    # (titles like "بدنه صفر" were wrongly marking used cars as new).
+    zero = 1 if (d["mileage"] == 0 or (d["mileage"] is None and "صفر" in (row["title"] or ""))) else 0
     con.execute(
         "UPDATE ads SET brand_model=?, brand=?, model=?, year=?, mileage=?, fuel=?, gearbox=?,"
         " body=?, customs=?, color=?, zero_km=?, first_price=?, current_price=?, status='active',"
@@ -148,8 +150,9 @@ def recheck(con):
                  d.get("gearbox_cond"), divar.customs_status(text), analytics.seller_type(text),
                  d.get("photo") or None, r["token"]))
             if price is not None and price != r["current_price"]:
-                con.execute("UPDATE ads SET current_price=?, first_price=COALESCE(first_price, ?) "
-                            "WHERE token=?", (price, price, r["token"]))
+                con.execute("UPDATE ads SET current_price=?, first_price=CASE WHEN first_price IS NULL "
+                            "OR first_price < ? THEN ? ELSE first_price END WHERE token=?",
+                            (price, config.PRICE_FLOOR, price, r["token"]))
                 db.add_price(con, r["token"], t, price)
                 changed += 1
             update_post(con, r["token"])  # specs/market may have changed
@@ -243,6 +246,11 @@ def update_post(con, token):
 def fixups(con):
     """One-time repairs of data written by older versions."""
     con.execute("UPDATE ads SET year = year % 10000 WHERE year > 9999")
+    con.execute("UPDATE ads SET zero_km=0 WHERE zero_km=1 AND mileage > 0")
+    # "First price" must be the first real price, never a fake one like 1,000 toman.
+    con.execute("UPDATE ads SET first_price=(SELECT price FROM price_history h WHERE h.token=ads.token "
+                "AND h.price >= ? ORDER BY seen_at LIMIT 1) WHERE first_price IS NULL OR first_price < ?",
+                (config.PRICE_FLOOR, config.PRICE_FLOOR))
     # Plate rule: anything not explicitly national is a free-zone (Anzali) plate.
     con.execute("UPDATE ads SET customs='پلاک منطقه آزاد' WHERE customs IS NULL OR "
                 "customs IN ('نامشخص', 'منطقه آزاد / گذر موقت')")
