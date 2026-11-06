@@ -30,6 +30,8 @@ def group_median(prices):
 def is_below_market(price, med):
     if price is None or med is None or price < config.PRICE_FLOOR:
         return False
+    if price < config.OUTLIER_LOW * med:   # placeholder price, not a real bargain
+        return False
     return price <= config.BELOW_MARKET_RATIO * med
 
 
