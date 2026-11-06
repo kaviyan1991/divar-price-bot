@@ -1,6 +1,7 @@
 """Market analytics for Gilan ads. Every comparison uses cars that share: Divar model,
-production year, zero-km/used, plate type, fuel and colour.
-Mileage, gearbox and body/engine/chassis/gearbox condition are NOT matched (owner's decision).
+production year, zero-km/used, plate type and fuel.
+Colour, mileage, gearbox and body/engine/chassis/gearbox condition are NOT matched
+(owner's decision); the caption still shows how many compared cars share the colour.
 Analyses that study one factor (mileage, year, plate, seller) keep all other specs equal."""
 import datetime as dt
 
@@ -9,7 +10,7 @@ import stats
 
 HOT_DAYS, NORMAL_DAYS = 7, 21
 DEALER_WORDS = ("نمایشگاه", "اتوگالری", "اتو گالری", "گالری", "نمایندگی", "autogallery")
-SPEC_FIELDS = ("brand_model", "year", "zero_km", "customs", "fuel", "color")
+SPEC_FIELDS = ("brand_model", "year", "zero_km", "customs", "fuel")
 LABELS = {"customs": "نوع پلاک", "fuel": "سوخت", "gearbox": "گیربکس", "color": "رنگ",
           "body": "وضعیت بدنه", "engine": "وضعیت موتور", "chassis": "وضعیت شاسی",
           "gearbox_cond": "وضعیت گیربکس", "brand_model": "مدل", "year": "سال"}
@@ -80,6 +81,33 @@ def _median_min(prices, n_min):
 def market(con, ad):
     """(median, n) of identical cars, or (None, n)."""
     return _median_min([r["current_price"] for r in similar(con, ad)], MIN_EXACT)
+
+
+def color_split(con, ad):
+    """(same colour, other colours) among the cars used for the market average."""
+    rows = similar(con, ad)
+    valid = set(stats.valid_prices([r["current_price"] for r in rows]))
+    rows = [r for r in rows if r["current_price"] in valid]
+    same = sum(1 for r in rows if r["color"] and r["color"] == ad["color"])
+    return same, len(rows) - same
+
+
+def unrealistic(price, avg):
+    """A price far below/above similar cars is a placeholder, not a real price."""
+    return bool(avg) and price is not None and not (
+        config.OUTLIER_LOW * avg <= price <= config.OUTLIER_HIGH * avg)
+
+
+def deal_stars(price, avg):
+    """1-5 stars by how far the price is below (or above) the market average."""
+    if not avg or price is None or price < config.PRICE_FLOOR or unrealistic(price, avg):
+        return None, None
+    diff = (price - avg) * 100 / avg
+    for limit, stars, label in ((-15, 5, "خیلی ارزان"), (-8, 4, "ارزان"), (-3, 3, "کمی زیر بازار"),
+                                (5, 2, "هم‌قیمت بازار")):
+        if diff <= limit:
+            return stars, label
+    return 1, "گران‌تر از بازار"
 
 
 def market_status(con, ad):
@@ -197,7 +225,7 @@ def seller_split(con, ad):
 
 def describe(ad):
     """Short spec line of a comparison group."""
-    parts = [ad["color"], ad["customs"]]
+    parts = [ad["customs"]]
     if ad["fuel"] and ad["fuel"] != "بنزین":
         parts.append(ad["fuel"])
     return " | ".join(p for p in parts if p)
