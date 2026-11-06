@@ -3,6 +3,7 @@ import datetime as dt
 import io
 import re
 
+import admin
 import analytics
 import db
 import stats
@@ -129,7 +130,7 @@ def search_text(con, query):
     groups, incomplete = groups_of(ads)
     lines = [f"📊 <b>نتیجه برای «{escape_html(query)}»</b>",
              "فقط ماشین‌های کاملاً مشابه با هم مقایسه می‌شوند "
-             "(مدل، سال، صفر یا کارکرده، نوع پلاک، سوخت و رنگ)."]
+             "(مدل، سال، صفر یا کارکرده، نوع پلاک و سوخت)."]
     for grp in groups[:6]:
         a0 = grp[0]
         active = [a for a in grp if a["status"] == "active"]
@@ -241,7 +242,7 @@ def estimate_text(con, query):
                 rows.append((n, int(med), rep))
     if not rows:
         return (f"برای «{escape_html(query)}» هنوز {fa_num(analytics.MIN_EXACT)} آگهی کاملاً مشابه "
-                "(همان مدل، سال، رنگ، نوع پلاک و سوخت) پیدا نکردم.")
+                "(همان مدل، سال، نوع پلاک و سوخت) پیدا نکردم.")
     rows.sort(key=lambda r: r[0], reverse=True)
     lines = [f"💡 <b>تخمین قیمت منصفانه</b> — {escape_html(query)}",
              f"برای کارکرد {fmt_int(mileage)} کیلومتر، جدا برای هر ترکیب مشخصات:"]
@@ -396,7 +397,14 @@ def process_updates(con):
         offset = max(offset, u["update_id"] + 1)
         try:
             if "message" in u and u["message"].get("chat", {}).get("type") == "private":
-                handle_text(con, u["message"]["chat"]["id"], u["message"].get("text", ""))
+                chat_id = u["message"]["chat"]["id"]
+                now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                con.execute("INSERT INTO users(chat_id,first_seen,last_seen,messages) VALUES(?,?,?,1) "
+                            "ON CONFLICT(chat_id) DO UPDATE SET last_seen=excluded.last_seen, "
+                            "messages=messages+1", (chat_id, now, now))
+                text = u["message"].get("text", "")
+                if not admin.handle(con, chat_id, text):
+                    handle_text(con, chat_id, text)
             elif "callback_query" in u:
                 cq = u["callback_query"]
                 telegram.answer_callback(cq["id"])
