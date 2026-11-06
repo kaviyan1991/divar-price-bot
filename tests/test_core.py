@@ -150,7 +150,7 @@ class BotTests(unittest.TestCase):
         self.assertIn("divar.ir/v/p0", txt)
         est = interact.estimate_text(con, "تخمین پرادو 2022 41000 سفید")
         self.assertIn("حدود", est)
-        self.assertIn("پیدا نکردم", interact.estimate_text(con, "تخمین پرادو 2022 41000 مشکی"))
+        self.assertIn("پیدا نکردم", interact.estimate_text(con, "تخمین پرادو 2022 41000 هیبرید"))
         self.assertNotIn("کارکرد نزدیک", txt)
 
     def test_watch_match(self):
@@ -177,19 +177,21 @@ class ExactMatchTests(unittest.TestCase):
         self.con = db.connect(":memory:")
         for i in range(4):
             _add(self.con, f"w{i}", mileage=40000 + i * 2000, current_price=5_000_000_000 + i * 50_000_000)
-        _add(self.con, "black", color="مشکی", current_price=9_000_000_000)
+        _add(self.con, "black", color="مشکی", current_price=5_300_000_000)
+        _add(self.con, "rare", year=2019, current_price=3_000_000_000)
         _add(self.con, "free", customs="پلاک منطقه آزاد", current_price=4_000_000_000)
         _add(self.con, "painted", body="رنگ‌شدگی در ۱ ناحیه", current_price=4_200_000_000)
         _add(self.con, "far_km", mileage=150000, current_price=3_000_000_000)
-        _add(self.con, "unknown", color="")
+        _add(self.con, "unknown", fuel="")
 
     def test_only_identical_cars_are_compared(self):
         ad = self.con.execute("SELECT * FROM ads WHERE token='w0'").fetchone()
         tokens = {r["token"] for r in self.an.similar(self.con, ad)}
-        # body condition and mileage are not compared any more
-        self.assertEqual(tokens, {"w1", "w2", "w3", "painted", "far_km"})
+        # colour, body condition and mileage are not compared any more
+        self.assertEqual(tokens, {"w1", "w2", "w3", "painted", "far_km", "black"})
         med, n = self.an.market(self.con, ad)
-        self.assertEqual(n, 5)
+        self.assertEqual(n, 6)
+        self.assertEqual(self.an.color_split(self.con, ad), (5, 1))
 
     def test_gearbox_is_not_compared(self):
         _add(self.con, "no_gearbox", gearbox="")
@@ -199,27 +201,29 @@ class ExactMatchTests(unittest.TestCase):
     def test_unknown_spec_is_never_compared(self):
         ad = self.con.execute("SELECT * FROM ads WHERE token='unknown'").fetchone()
         self.assertEqual(self.an.market(self.con, ad), (None, 0))
-        self.assertIn("نامشخص: رنگ", self.an.market_status(self.con, ad))
+        self.assertIn("نامشخص: سوخت", self.an.market_status(self.con, ad))
         w0 = self.con.execute("SELECT * FROM ads WHERE token='w0'").fetchone()
         self.assertNotIn("unknown", {r["token"] for r in self.an.similar(self.con, w0)})
 
     def test_too_few_identical(self):
-        ad = self.con.execute("SELECT * FROM ads WHERE token='black'").fetchone()
+        ad = self.con.execute("SELECT * FROM ads WHERE token='rare'").fetchone()
         self.assertIsNone(self.an.market(self.con, ad)[0])
         self.assertIn("کمتر از", self.an.market_status(self.con, ad))
 
     def test_caption_uses_exact_median(self):
         ad = self.con.execute("SELECT * FROM ads WHERE token='w0'").fetchone()
         cap = main.caption(self.con, ad)
-        self.assertIn("آگهی کاملاً مشابه", cap)
+        self.assertIn("آگهی مشابه", cap)
+        self.assertIn("هم‌رنگ", cap)
+        self.assertIn("امتیاز معامله", cap)
 
     def test_factor_analyses_vary_one_thing_only(self):
         w0 = self.con.execute("SELECT * FROM ads WHERE token='w0'").fetchone()
         mf, nf, mn, nn = self.an.plate_gap(self.con, w0)
         self.assertEqual(nf, 1)   # only 'free' differs by plate; 'unknown' is excluded
-        self.assertEqual(nn, 6)
+        self.assertEqual(nn, 7)
         pct, n = self.an.mileage_effect(self.con, w0)
-        self.assertEqual(n, 6)    # every white national-plate 2022 Prado, any mileage/condition
+        self.assertEqual(n, 7)    # every national-plate petrol 2022 Prado, any colour/mileage/condition
         self.assertLess(pct, 0)
         self.assertIsNotNone(self.an.fair_price(self.con, w0))
         self.assertEqual(self.an.seller_type("فروش در نمایشگاه اتو پارس"), "نمایشگاه")
@@ -253,6 +257,44 @@ class ZeroKmTests(unittest.TestCase):
         d = divar.parse_detail(SAMPLE)   # mileage 160000
         main.apply_detail(con, "u1", d)
         self.assertEqual(con.execute("SELECT zero_km FROM ads").fetchone()[0], 0)
+
+
+class FeatureTests(unittest.TestCase):
+    def test_deal_stars(self):
+        import analytics
+        self.assertEqual(analytics.deal_stars(8_000_000_000, 10_000_000_000)[0], 5)
+        self.assertEqual(analytics.deal_stars(9_500_000_000, 10_000_000_000)[0], 3)
+        self.assertEqual(analytics.deal_stars(12_000_000_000, 10_000_000_000)[0], 1)
+        self.assertEqual(analytics.deal_stars(None, 10_000_000_000), (None, None))
+
+    def test_rtl_marks_every_line(self):
+        import telegram
+        out = telegram.rtl("سلام\n\nLE/2025 پرادو")
+        self.assertTrue(all(l.startswith("\u200f") for l in out.split("\n") if l))
+
+    def test_admin_pause_resume_and_stranger(self):
+        import admin, config
+        con = db.connect(":memory:")
+        old = config.ADMIN_ID
+        config.ADMIN_ID = "42"
+        try:
+            self.assertFalse(admin.handle(con, 7, "/pause"))      # not the owner
+            self.assertTrue(admin.handle(con, 42, "/pause"))
+            self.assertEqual(db.get_state(con, "paused"), "1")
+            self.assertTrue(admin.handle(con, 42, "/resume"))
+            self.assertEqual(db.get_state(con, "paused"), "0")
+            self.assertIn("وضعیت ربات", admin.stats_text(con))
+        finally:
+            config.ADMIN_ID = old
+
+    def test_best_deals(self):
+        con = db.connect(":memory:")
+        for i in range(4):
+            _add(con, f"n{i}", current_price=5_000_000_000)
+        _add(con, "deal", current_price=4_000_000_000)
+        txt = report.best_deals(con)
+        self.assertIn("بهترین معامله‌های هفته", txt)
+        self.assertIn("divar.ir/v/deal", txt)
 
 
 class DailyTests(unittest.TestCase):
