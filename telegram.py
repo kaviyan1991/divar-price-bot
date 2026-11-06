@@ -7,7 +7,17 @@ import urllib.request
 import config
 
 
+RLM = "\u200f"
+
+
+def rtl(text):
+    """Start every line with a right-to-left mark so Telegram aligns Persian text to the right."""
+    return "\n".join(RLM + line if line.strip() else line for line in (text or "").split("\n"))
+
+
 def _call(method, params):
+    if config.DRY_RUN:  # tests / local dry runs never talk to Telegram
+        return {"ok": False, "description": "dry run"}
     url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/{method}"
     data = json.dumps(params).encode()
     req = urllib.request.Request(url, data=data, headers={"content-type": "application/json"})
@@ -38,14 +48,14 @@ def post_ad(caption, image_url, button_url=None):
     kb = link_button(button_url)
     if image_url:
         params = {"chat_id": config.CHANNEL_ID, "photo": image_url,
-                  "caption": caption, "parse_mode": "HTML"}
+                  "caption": rtl(caption)[:1024], "parse_mode": "HTML"}
         if kb:
             params["reply_markup"] = kb
         r = _call("sendPhoto", params)
         if r.get("ok"):
             return r["result"]["message_id"]
         print("sendPhoto failed:", r.get("description"))
-    params = {"chat_id": config.CHANNEL_ID, "text": caption,
+    params = {"chat_id": config.CHANNEL_ID, "text": rtl(caption),
               "parse_mode": "HTML", "disable_web_page_preview": True}
     if kb:
         params["reply_markup"] = kb
@@ -60,7 +70,7 @@ def edit_ad(message_id, caption, has_photo, button_url=None):
     method = "editMessageCaption" if has_photo else "editMessageText"
     key = "caption" if has_photo else "text"
     params = {"chat_id": config.CHANNEL_ID, "message_id": message_id,
-              key: caption, "parse_mode": "HTML"}
+              key: rtl(caption)[:1024] if has_photo else rtl(caption), "parse_mode": "HTML"}
     kb = link_button(button_url)
     if kb:
         params["reply_markup"] = kb
@@ -77,11 +87,13 @@ def delete_ad(message_id):
     return bool(r.get("ok"))
 
 
-def send_message(chat_id, text, keyboard=None):
-    params = {"chat_id": chat_id, "text": text[:4096], "parse_mode": "HTML",
+def send_message(chat_id, text, keyboard=None, reply_to=None):
+    params = {"chat_id": chat_id, "text": rtl(text)[:4096], "parse_mode": "HTML",
               "disable_web_page_preview": True}
     if keyboard:
         params["reply_markup"] = {"inline_keyboard": keyboard}
+    if reply_to:
+        params["reply_parameters"] = {"message_id": reply_to, "allow_sending_without_reply": True}
     return _call("sendMessage", params)
 
 
@@ -99,7 +111,7 @@ def send_photo_bytes(chat_id, png, caption=""):
     """Upload a PNG (e.g. a chart) using multipart/form-data."""
     boundary = "----divarbot" + str(int(time.time() * 1000))
     parts = []
-    for name, value in (("chat_id", str(chat_id)), ("caption", caption), ("parse_mode", "HTML")):
+    for name, value in (("chat_id", str(chat_id)), ("caption", rtl(caption)), ("parse_mode", "HTML")):
         parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n"
                      f"{value}\r\n".encode())
     parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"photo\"; "
