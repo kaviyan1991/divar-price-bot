@@ -60,6 +60,25 @@ def build(con, now):
     return "\n".join(lines)
 
 
+def best_deals(con, limit=5):
+    """Active ads furthest below the market average of similar cars."""
+    picks = []
+    for ad in con.execute("SELECT * FROM ads WHERE status='active' AND duplicate_of IS NULL "
+                          "AND current_price >= ?", (config.PRICE_FLOOR,)):
+        avg, n = analytics.market(con, ad)
+        if avg and ad["current_price"] < avg and not analytics.unrealistic(ad["current_price"], avg):
+            picks.append(((avg - ad["current_price"]) * 100 / avg, ad, avg))
+    picks.sort(key=lambda p: p[0], reverse=True)
+    if not picks:
+        return ""
+    lines = ["💎 <b>بهترین معامله‌های هفته</b> (بیشترین فاصله زیر میانگین بازار)", ""]
+    for i, (pct, ad, avg) in enumerate(picks[:limit], 1):
+        lines.append(f"{fa_num(i)}. <a href=\"https://divar.ir/v/{ad['token']}\">{escape_html(ad['brand_model'])} "
+                     f"{fa_num(ad['year'])}</a> — {fmt_price(ad['current_price'])} "
+                     f"({fa_num(round(pct))}٪ زیر میانگین)")
+    return "\n".join(lines)
+
+
 def exact_groups(con):
     """Groups of cars that share every compared spec."""
     groups = {}
@@ -113,10 +132,14 @@ def maybe_post(con):
     if db.get_state(con, "last_report_week") == week:
         return
     text = build(con, dt.datetime.now(dt.timezone.utc))
+    deals = best_deals(con)
     if config.DRY_RUN:
         print(text)
+        print(deals)
     else:
         telegram.send_message(config.CHANNEL_ID, text)
+        if deals:
+            telegram.send_message(config.CHANNEL_ID, deals)
     db.set_state(con, "last_report_week", week)
     con.commit()
 
