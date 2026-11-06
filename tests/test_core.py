@@ -246,6 +246,15 @@ class NoPriceTests(unittest.TestCase):
         self.assertEqual({r["token"] for r in main.postable(con)}, {"priced", "negotiable"})
 
 
+class ZeroKmTests(unittest.TestCase):
+    def test_title_word_does_not_make_used_car_new(self):
+        con = db.connect(":memory:")
+        con.execute("INSERT INTO ads(token,title,status,first_seen) VALUES('u1','کمری بدنه صفر','pending','x')")
+        d = divar.parse_detail(SAMPLE)   # mileage 160000
+        main.apply_detail(con, "u1", d)
+        self.assertEqual(con.execute("SELECT zero_km FROM ads").fetchone()[0], 0)
+
+
 class DailyTests(unittest.TestCase):
     def test_jalali(self):
         self.assertEqual(report.g2j(2026, 10, 1), (1405, 7, 9))
