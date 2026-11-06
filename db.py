@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS price_history (
 CREATE INDEX IF NOT EXISTS ix_hist ON price_history(token);
 CREATE INDEX IF NOT EXISTS ix_group ON ads(brand_model, year);
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS users (chat_id INTEGER PRIMARY KEY, first_seen TEXT, last_seen TEXT,
+  messages INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS watches (chat_id INTEGER, query TEXT, created_at TEXT,
   PRIMARY KEY (chat_id, query));
 """
