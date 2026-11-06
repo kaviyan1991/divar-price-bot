@@ -38,6 +38,7 @@ jobs:
       - name: Run bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ADMIN_ID: ${{ secrets.ADMIN_ID }}
           FORCE_POST_ONE: ${{ inputs.test_post && '1' || '' }}
         run: python3 main.py
       - name: Save database
