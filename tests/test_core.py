@@ -297,6 +297,23 @@ class FeatureTests(unittest.TestCase):
         self.assertIn("divar.ir/v/deal", txt)
 
 
+class NetworkTests(unittest.TestCase):
+    def test_timeouts_are_retried_then_reported_as_unreachable(self):
+        import urllib.request
+        calls = []
+        def boom(*a, **k):
+            calls.append(1)
+            raise TimeoutError("The read operation timed out")
+        old_open, old_sleep = urllib.request.urlopen, divar.time.sleep
+        urllib.request.urlopen, divar.time.sleep = boom, lambda s: None
+        try:
+            with self.assertRaises(divar.Unreachable):
+                divar._request("https://example.invalid")
+        finally:
+            urllib.request.urlopen, divar.time.sleep = old_open, old_sleep
+        self.assertEqual(len(calls), 3)
+
+
 class DailyTests(unittest.TestCase):
     def test_jalali(self):
         self.assertEqual(report.g2j(2026, 10, 1), (1405, 7, 9))
