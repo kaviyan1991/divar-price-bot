@@ -393,6 +393,16 @@ def main():
         print("BLOCKED by Divar:", e, "- pausing until", until)
         admin.add_counter(con, "blocks")
         admin.notify(f"⚠️ دیوار درخواست‌های ربات را رد کرد ({e}). تا {until} جمع‌آوری متوقف می‌شود.")
+    except divar.Unreachable as e:
+        # Temporary network problem: keep what this run collected, retry on the next run.
+        streak = int(db.get_state(con, "net_fail_streak", "0") or 0) + 1
+        db.set_state(con, "net_fail_streak", streak)
+        print("network problem, will retry next run:", e)
+        if streak == 3:  # only bother the owner when it keeps happening
+            admin.notify(f"⚠️ سه اجرای پشت‌سرهم به دیوار وصل نشد ({escape_html(str(e))[:150]}). "
+                         "ربات خودش دوباره تلاش می‌کند.")
+    else:
+        db.set_state(con, "net_fail_streak", 0)
     con.commit()
     post_new(con)
     report.maybe_post(con)
