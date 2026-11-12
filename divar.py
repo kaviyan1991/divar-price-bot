@@ -28,17 +28,30 @@ def _pause():
     time.sleep(random.uniform(config.SLEEP_MIN, config.SLEEP_MAX))
 
 
-def _request(url, body=None):
+class Unreachable(Exception):
+    """Network trouble (timeouts, dropped connections): try again next run."""
+
+
+def _request(url, body=None, attempts=3):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, headers=HEADERS,
                                  method="POST" if data else "GET")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return r.status, json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
-        if e.code in (403, 429):
-            raise Blocked(f"HTTP {e.code}")
-        return e.code, None
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status, json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            if e.code in (403, 429):
+                raise Blocked(f"HTTP {e.code}")
+            if e.code >= 500 and attempt < attempts - 1:
+                time.sleep(5 * (attempt + 1))
+                continue
+            return e.code, None
+        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
+            if attempt < attempts - 1:
+                time.sleep(5 * (attempt + 1))  # short wait, then retry
+                continue
+            raise Unreachable(repr(e))
 
 
 def search_page(pagination_data=None):
