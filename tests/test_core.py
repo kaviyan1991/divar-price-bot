@@ -314,6 +314,17 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(len(calls), 3)
 
 
+class ServerErrorTests(unittest.TestCase):
+    def test_502_on_search_is_temporary(self):
+        old_req, old_pause = divar._request, divar._pause
+        divar._request, divar._pause = (lambda url, body=None: (502, None)), (lambda: None)
+        try:
+            with self.assertRaises(divar.Unreachable):
+                divar.search_page()
+        finally:
+            divar._request, divar._pause = old_req, old_pause
+
+
 class DailyTests(unittest.TestCase):
     def test_jalali(self):
         self.assertEqual(report.g2j(2026, 10, 1), (1405, 7, 9))
