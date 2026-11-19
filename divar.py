@@ -75,6 +75,8 @@ def search_page(pagination_data=None):
     _pause()
     status, j = _request(SEARCH_URL, body)
     if status != 200 or not j:
+        if status is None or status >= 500:  # Divar's servers are having a moment: retry next run
+            raise Unreachable(f"search failed: HTTP {status}")
         raise RuntimeError(f"search failed: HTTP {status}")
     rows = [parse_row(w["data"]) for w in j.get("list_widgets", [])
             if w.get("widget_type") == "POST_ROW"]
